@@ -4,6 +4,7 @@ import {
   IconFileExport,
   IconMoon,
   IconPackageImport,
+  IconReportAnalytics,
   IconSql,
   IconStack2,
   IconSun,
@@ -18,11 +19,12 @@ import { settingsActions } from '../settings/settings.actions';
 import { settingsState } from '../settings/settings.state';
 import { openSqlAssetsPanel } from '../sql-assets/sqlAssetsPanel';
 import { openSqlEditorPanel } from '../sql-editor/sqlEditorPanel';
+import { openSqlReportsPanel } from '../sql-reports/sqlReportsPanel';
 import { ribbonHomeActions as act } from './ribbonHome.actions';
 
-/** Assets: the model panels (library / import / export) as small buttons, the
- *  SQL panels (library / editor) as medium ones, and the wipe-everything local
- *  reset. Canvas: clear/screenshot and the light/dark theme toggle. */
+/** Assets: the model panels (library / import / export) and the SQL panels
+ *  (library / editor / reports) as two columns of small buttons, and the
+ *  wipe-everything local reset. Canvas: clear/screenshot and the light/dark theme toggle. */
 export function HomeAssetsGroups() {
   const dark = settingsState.use().theme === 'dark';
 
@@ -54,7 +56,7 @@ export function HomeAssetsGroups() {
           onClick={() => openExportPanel()}
         />
         <RibbonButton
-          size="medium"
+          size="mini"
           icon={<IconDatabase />}
           label="SQL"
           tooltip="Open the SQL Assets library (SQLite databases per store)"
@@ -62,12 +64,20 @@ export function HomeAssetsGroups() {
           onClick={() => openSqlAssetsPanel()}
         />
         <RibbonButton
-          size="medium"
+          size="mini"
           icon={<IconSql />}
           label="SQL Editor"
           tooltip="Open the SQL Editor panel"
           shortcut="sql.editor"
           onClick={() => openSqlEditorPanel()}
+        />
+        <RibbonButton
+          size="mini"
+          icon={<IconReportAnalytics />}
+          label="Reports"
+          tooltip="Open the SQL Reports panel (saved queries with filters)"
+          shortcut="sql.reports"
+          onClick={() => openSqlReportsPanel()}
         />
         <RibbonButton
           icon={<IconTrashX />}

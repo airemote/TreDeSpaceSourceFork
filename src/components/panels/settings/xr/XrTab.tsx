@@ -19,9 +19,9 @@ export function XrTab() {
       title="XR (VR / AR headset)"
       info={
         <>
-          Headset sessions over WebXR + WebGPU — start them from Home › Camera. Render scale and foveation trade sharpness
-          for frame rate; a standalone headset needs both. The rest of the look (edges, colours, lighting) follows the
-          desktop settings; TAA and ambient occlusion stay off in a headset.
+          Headset sessions over WebXR + WebGPU — start them from Home › Camera. Render scale and foveation trade
+          sharpness for frame rate; a standalone headset needs both. The rest of the look (edges, colours, lighting)
+          follows the desktop settings; TAA and ambient occlusion stay off in a headset.
         </>
       }
     >

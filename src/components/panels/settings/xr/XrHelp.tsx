@@ -16,7 +16,7 @@ const SETUP: readonly string[] = [
   'In the headset browser open chrome://flags, turn on “WebXR experimental features” and the WebGPU entries, and restart the browser.',
   'Open the viewer in the headset browser over HTTPS (from a PC dev server: npm run dev -- --host, then https://<pc-address>:5173 and accept the certificate).',
   'A PC with a headset as its display works too (Windows only — Chrome has no WebXR on Linux).',
-  'In AR, release the grip or A to save the alignment: the same scene opens aligned at that place next time (where the headset keeps anchors).',
+  'In AR, release the grip or A to save the alignment: the same scene opens aligned at that place next time (where the headset keeps anchors). Home › Camera › Unpin forgets it.',
 ];
 
 // -----------------------------------------------------------------------------

@@ -16,7 +16,7 @@ Entries from before the stable pilot (0.26.1) have been removed.
   with your head (the alignment "lock"), B returns to the start. In AR the
   background stays clear for the passthrough, and releasing a grab or the
   lock keeps the alignment for that scene in a persistent anchor (Home › Camera ›
-  Forget alignments drops them). Settings › XR: render scale, foveation, snap
+  Unpin drops them). Settings › XR: render scale, foveation, snap
   angle, MSAA, desktop mirror, depth hand-off to the headset. In a headset
   TAA, ambient occlusion, the outline and the view cube are off; a selection
   always tints. The binding is still behind browser flags (Settings › XR
@@ -29,12 +29,15 @@ Entries from before the stable pilot (0.26.1) have been removed.
   (info, not a warning — no headset is the normal case); again only when a
   headset connects or disconnects.
   Home ribbon: Persp. / Ortho moved out of Canvas into their own Camera
-  section, with VR, AR and Forget alignments as small buttons beside them.
+  section, with VR, AR and Unpin as small buttons beside them.
   Persp. / Ortho are one toggle there now (it shows the current projection;
   new hotkey `camera.projection.toggle`, the two direct ones stay). The
   switch keeps the camera position and target, as before.
-  Assets: Model / Import / Export as small buttons (Export is new here), and
-  SQL with SQL Editor (new here) as medium buttons below each other.
+  Draw Mode split in two: a Sketch section (On, with the modes Gray / Fill /
+  Color — formerly Wire / Colour Fill / Colour Wire) and a Selection section
+  (Tint / Outline / Both).
+  Assets: Model / Import / Export and SQL / SQL Editor / Reports as two
+  columns of small buttons (Export, SQL Editor and Reports are new here).
 
   Renderer: the scene passes (cull → draw → HZB → cull → draw → blend → AO →
   post) moved out of `frame()` into `encodeScene()`, fed by a per-view camera

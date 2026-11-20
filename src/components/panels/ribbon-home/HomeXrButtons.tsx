@@ -91,9 +91,13 @@ export function HomeXrButtons() {
       <RibbonButton
         size="mini"
         icon={<IconMapPinOff />}
-        label="Forget alignments"
+        label="Unpin"
         disabled={s.alignmentCount === 0}
-        tooltip={`Forget the ${s.alignmentCount} saved AR alignment(s): the next AR session starts from the desktop view`}
+        tooltip={
+          s.alignmentCount > 0
+            ? `Unpin the model from the real world: forget the ${s.alignmentCount} saved AR alignment(s), so the next AR session starts from the desktop view instead of where you last lined the model up`
+            : 'Unpin the model from the real world — nothing is pinned yet. In AR, releasing a grab or A pins the model where you put it, for the next AR session too.'
+        }
         shortcut="home.xr.forgetAlignments"
         onClick={xrActions.forgetAlignments}
       />

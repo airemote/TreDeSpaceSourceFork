@@ -1472,7 +1472,7 @@ export const HOTKEYS: HotkeyDef[] = [
   {
     id: 'view.sketchColor.off',
     category: 'View',
-    label: 'Draw mode: wire',
+    label: 'Sketch: gray',
     defaultKeys: 'ALT 1216',
     description: 'Sketch mode colour off — plain paper and ink',
     run: () => viewerState.set({ sketchColorMode: 'off' }),
@@ -1480,7 +1480,7 @@ export const HOTKEYS: HotkeyDef[] = [
   {
     id: 'view.sketchColor.fill',
     category: 'View',
-    label: 'Draw mode: colour fill',
+    label: 'Sketch: fill',
     defaultKeys: 'ALT 1217',
     description: 'Sketch mode: wash the mesh colours onto the paper',
     run: () => viewerState.set({ sketchColorMode: 'fill' }),
@@ -1488,7 +1488,7 @@ export const HOTKEYS: HotkeyDef[] = [
   {
     id: 'view.sketchColor.edges',
     category: 'View',
-    label: 'Draw mode: colour wire',
+    label: 'Sketch: color',
     defaultKeys: 'ALT 1218',
     description: 'Sketch mode: the ink takes the mesh colour',
     run: () => viewerState.set({ sketchColorMode: 'edges' }),
@@ -2600,7 +2600,7 @@ export const HOTKEYS: HotkeyDef[] = [
   {
     id: 'home.xr.forgetAlignments',
     category: 'Home',
-    label: 'XR: forget AR alignments',
+    label: 'XR: unpin (forget AR alignments)',
     defaultKeys: 'ALT 1297',
     description: 'Forget the AR alignments kept across sessions — the next AR session starts from the desktop view',
     run: () => xrActions.forgetAlignments(),
