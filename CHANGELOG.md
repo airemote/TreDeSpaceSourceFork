@@ -25,6 +25,9 @@ Entries from before the stable pilot (0.26.1) have been removed.
   The cull's occlusion test now takes the projection's off-centre terms (a
   headset eye's frustum is asymmetric; the desktop passes zero), and the
   adapter is requested XR-compatible (falling back to a plain one).
+  The console says once at boot whether VR / AR can start here, and why not
+  (info, not a warning — no headset is the normal case); again only when a
+  headset connects or disconnects.
 
   Renderer: the scene passes (cull → draw → HZB → cull → draw → blend → AO →
   post) moved out of `frame()` into `encodeScene()`, fed by a per-view camera

@@ -45,6 +45,8 @@ const MATRIX_SIZE = 16;
 
 let session: XrSessionHandle | null = null;
 let isStarted = false;
+/** The support line last written to the console — logged again only on a change. */
+let loggedSupport = '';
 
 // -----------------------------------------------------------------------------
 // Helper functions
@@ -183,7 +185,23 @@ function handleEnd(renderer: Renderer, mode: XrMode, pose: WorldPose | null): vo
 }
 
 async function refreshSupport(renderer: Renderer): Promise<void> {
-  xrState.set({ support: await detectSupport(renderer) });
+  const support = await detectSupport(renderer);
+  xrState.set({ support });
+  const line = describeXrSupport(support);
+  if (line !== loggedSupport) {
+    loggedSupport = line;
+    consoleActions.log('info', line);
+  }
+}
+
+/** One line on what can start here — the console at boot and Settings › XR. */
+export function describeXrSupport(support: XrSupport): string {
+  const modes = [support.vr ? 'VR' : '', support.ar ? 'AR (passthrough)' : ''].filter(Boolean);
+  if (modes.length > 0) {
+    return `XR: ${modes.join(' and ')} available — start from Home › XR`;
+  }
+
+  return `XR: not available — ${support.reason ?? 'no headset session can start here'}`;
 }
 
 // -----------------------------------------------------------------------------

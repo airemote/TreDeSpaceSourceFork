@@ -1,20 +1,8 @@
 import { Checkbox, NumberInput } from '@treDeSpaceUI/widgets';
-import { xrActions } from '../../../../state/xr/xr.actions';
+import { describeXrSupport, xrActions } from '../../../../state/xr/xr.actions';
 import { xrSettingsState, xrState } from '../../../../state/xr/xr.state';
 import { SettingsSection } from '../SettingsSection';
 import { XrHelp } from './XrHelp';
-
-// -----------------------------------------------------------------------------
-// Helper functions
-// -----------------------------------------------------------------------------
-
-function describeSupport(vr: boolean, ar: boolean, reason: string | null): string {
-  if (vr || ar) {
-    return `Available here: ${[vr ? 'VR' : '', ar ? 'AR (passthrough)' : ''].filter(Boolean).join(' and ')}.`;
-  }
-
-  return reason ?? 'No headset session is available here.';
-}
 
 // -----------------------------------------------------------------------------
 // Render
@@ -37,7 +25,7 @@ export function XrTab() {
         </>
       }
     >
-      <div className="text-slate-400 text-xs">{describeSupport(support.vr, support.ar, support.reason)}</div>
+      <div className="text-slate-400 text-xs">{describeXrSupport(support)}</div>
       <NumberInput
         label="Render scale"
         labelPosition="split"
