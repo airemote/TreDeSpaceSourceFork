@@ -62,6 +62,10 @@ struct CullParams {
   sort_far: f32,     // perspective sort-key range end (view depth from the eye)
   new_cap: u32,      // max meshlets pass 2 may newly draw in one frame (0 = no cap)
   cull_moved: u32,   // 1 = rigid-transformed meshlets keep the cone + HZB tests
+  // off-centre projection terms p[8], p[9]: 0 for the desktop's symmetric
+  // frustum, non-zero for a headset eye — they shift the projected sphere box
+  p20: f32,
+  p21: f32,
 };
 
 @group(0) @binding(0) var<storage, read> meshlets: array<u32>;
@@ -414,10 +418,13 @@ fn project_sphere(c: vec3f, r: f32, aabb: ptr<function, vec4f>) -> bool {
   let vy = vec2f(sqrt(dot(cy, cy) - r * r), r);
   let miny = mat2x2f(vy.x, vy.y, -vy.y, vy.x) * cy;
   let maxy = mat2x2f(vy.x, -vy.y, vy.y, vy.x) * cy;
+  // ndc = p00 * x / z - p20 (and p11 / p21 for y): the off-centre terms of a
+  // headset eye shift the box; without them visible meshlets test against
+  // the wrong HZB texels and get culled
   var box = vec4f(
     minx.x / minx.y * params.p00, miny.x / miny.y * params.p11,
     maxx.x / maxx.y * params.p00, maxy.x / maxy.y * params.p11,
-  );
+  ) - vec4f(params.p20, params.p21, params.p20, params.p21);
   box = box.xwzy * vec4f(0.5, -0.5, 0.5, -0.5) + vec4f(0.5); // clip -> uv
   *aabb = box;
   return true;

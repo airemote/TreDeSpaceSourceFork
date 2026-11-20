@@ -3,10 +3,10 @@
 exports[`shader text pins > produces byte-identical WGSL for every entry point and variant 1`] = `
 {
   "cubeBlitWgsl()": "ecada98894e2e0d8aad79f9af408f69e06f2fd666f21559fb17f2d3ffa0dccd5",
-  "cullWgsl(false,false)": "6db8fac4ab79ce708487f9530b6cfcd8c7912696f318514026bb6fd2c2f361e1",
-  "cullWgsl(false,true)": "470d88ff3b2b17488dd0c3d0784f9582dd377f04dc4fc6d00fced7a177973d6a",
-  "cullWgsl(true,false)": "93a138108bdf1d397bd30b00b2ed7f39016f0f84eb1a976fbc432b1f62bfc534",
-  "cullWgsl(true,true)": "328d13db637f03ec8ab38f9dbfff1400a48c5beb040ca25e2b29049e87fdb1fa",
+  "cullWgsl(false,false)": "b878daef10136877d4b15288e8f1f3a0a0d154df51462ae0bfe697931963b6ba",
+  "cullWgsl(false,true)": "921f6627e7c24228d779f33920b0d755298d64c4c074bd0c5c6d90b13a16f085",
+  "cullWgsl(true,false)": "2b9f2523e6b3e77820bf8e6a86f69ff02eecf57bafa2fbaf859133312a4c6ad7",
+  "cullWgsl(true,true)": "8f0f1685ae26b98b6a1f4df2f08b72be3c82729780a0b1cc99fa98ad882b62e9",
   "hzbWgsl(false)": "817e184faf1f80ff6fe5713c1c12a2ed879a07d3c10b0e5463ab223f3388ed43",
   "hzbWgsl(true)": "19dcbba481bec69f35b464fcc8f2d5a2e290d22a31ea0b8ae56588ad9ddb24ac",
   "indexWidthWgsl(1)": "df0c306ec236bdf9ba8d897ee8f9e8cf909d5e73e8425a314f1e13cab63021b8",
@@ -24,8 +24,8 @@ exports[`shader text pins > produces byte-identical WGSL for every entry point a
   "pickItemIdWgsl(false)": "09bbe74c8d9f904dcdd090b887626f7cebea66403e1808f951108a93d2e813af",
   "pickItemIdWgsl(true)": "831e57eb5b94a2c1d63f93a96eecddf2489bc3f5a4371f469b1e3b79a58f6c3b",
   "pointsWgsl()": "d9c303db55791041f5773e3a9723aeea0b3cf7c9e8db8d6f51b833f64845d9c2",
-  "postWgsl(false)": "38b1f177ec3d9789d5d10663301bd8f26f285e87242ba6d54057da8e31c92d18",
-  "postWgsl(true)": "7f732ffce7422067e8b6ae011ceda749fd635e930cbaa41e6f9198988782a6db",
+  "postWgsl(false)": "34ddb32936ddc8bc2d7515b635c63ca438087b22ae2191612d140d3ec4d8d67f",
+  "postWgsl(true)": "cf0826d3ceff811c48f1d6e12b85cae419ae74dc6d564d27aa7d8e979cfec3fb",
   "renderVpWgsl()": "277988ea63f45b6005c9b57156184b6f8903584a4beb901b2f3eb1579c3569e0",
   "renderWgsl(false)": "896b8724f76389dda5036b8289e6d05918e349f0f9b7ac8c7c3f8d0366aa9854",
   "renderWgsl(true)": "b6dfeb4824149f5104fd520f06607600f5bff396cbd8a8b9ed3bf5fd359cc953",
@@ -35,5 +35,10 @@ exports[`shader text pins > produces byte-identical WGSL for every entry point a
   "vbaoWgsl(false)": "f3fa43f9e886bf70a7f6f4e96c1c7063b3841e17e8280a8bd8dc360794161a5f",
   "vbaoWgsl(true)": "2008f174d2fb7553dd85650c245c7cd8a1c7acf94ad6f1ca58db1b6d27d15fc3",
   "viewCubeWgsl()": "7d198cb3d4f76333eb76c37ce7426531b685ff1eddfd47d97982e24994755e84",
+  "xrDepthWgsl(false)": "4b8edc87f81bf2d92aa14344c5eaa1f858f8f07bb032dc6bf8decec07e57edcb",
+  "xrDepthWgsl(true)": "03d2c653dffe93a6583a8963bc5fd3e089ec0fe2ab45586cd406b1f9512eca49",
+  "xrMirrorWgsl()": "a74284c55aee9f868b1aad4735de3b40e404d0713f7300492581a03bc4b3d8df",
+  "xrRayPickWgsl(false)": "7806fd4e81521866e46857c2fb28afe62c6cb4cfaf6e6014034d5255280e8b9e",
+  "xrRayPickWgsl(true)": "12210fa57c80469af870a54b4721746de2c80b6de68e77272b64c17cc1643a6b",
 }
 `;

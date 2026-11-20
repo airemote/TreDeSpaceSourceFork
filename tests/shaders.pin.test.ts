@@ -23,6 +23,9 @@ import {
   sortScatterWgsl,
   vbaoWgsl,
   viewCubeWgsl,
+  xrDepthWgsl,
+  xrMirrorWgsl,
+  xrRayPickWgsl,
 } from '../src/lib/render/shaders';
 
 function sha(text: string): string {
@@ -64,6 +67,11 @@ describe('shader text pins', () => {
     hashes['panoWgsl(true)'] = sha(panoWgsl(true));
     hashes['pointsWgsl()'] = sha(pointsWgsl());
     hashes['viewCubeWgsl()'] = sha(viewCubeWgsl());
+    for (const msaa of [false, true]) {
+      hashes[`xrRayPickWgsl(${msaa})`] = sha(xrRayPickWgsl(msaa));
+      hashes[`xrDepthWgsl(${msaa})`] = sha(xrDepthWgsl(msaa));
+    }
+    hashes['xrMirrorWgsl()'] = sha(xrMirrorWgsl());
     expect(hashes).toMatchSnapshot();
   });
 });

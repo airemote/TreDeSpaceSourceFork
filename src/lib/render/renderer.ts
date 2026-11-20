@@ -119,10 +119,12 @@ import {
   vbaoWgsl,
 } from './shaders';
 import { SORT_CLEAR_BYTES, SORT_COUNT_WORD, sortScanWgsl, sortScatterWgsl } from './shaders/cull';
+import { POST_FLAG_TRANSPARENT_BG } from './shaders/post';
 import { unitSphereMesh } from './sphereMesh';
 import type { ViewCamera } from './viewCamera';
 import { type NavGizmoOptions, ViewCubePass } from './viewCubePass';
 import { type AdapterHints, readDeviceMemoryGb } from './vramHint';
+import { type XrFrameOptions, XrPasses, type XrRayHit, type XrViewTarget } from './xrPasses';
 
 export type { MeasureProbe, MeasureSnap } from './measureSnap';
 
@@ -194,6 +196,8 @@ type SceneFlags = Readonly<{
   sortActive: boolean;
   aoActive: boolean;
   usePost: boolean;
+  /** Draw the headset overlay (controller rays + reticles) with the helpers. */
+  xrOverlay: boolean;
 }>;
 
 /** Where in the display target the post pass draws (null = the whole target). */
@@ -245,7 +249,7 @@ const COUNT_SLOT = 256; // storage-binding offset alignment
 /** Count slots per model: pass 1, pass 2, sorted transparent list, outline list. */
 const COUNT_SLOTS = 4;
 const MAX_MODELS = 4096;
-const PARAMS_SIZE = 240; // CullParams in shaders/cull.ts
+const PARAMS_SIZE = 256; // CullParams in shaders/cull.ts (62 words, rounded to 16 bytes)
 /** Perspective sort-key span above the near plane before any model has bounds. */
 const SORT_FAR_FALLBACK_OCTAVES = 20;
 // Background transparency mode: the backdrop pass squeezes its depths into
@@ -695,6 +699,20 @@ export class Renderer {
   private targetsMsaa = false;
   private targetsPost = false;
   private targetsAo = false;
+  /** Size the targets were built at — the canvas, or a headset eye while XR runs. */
+  private targetW = 0;
+  private targetH = 0;
+
+  // headset (XR) state — see frameXr()
+  private readonly xr = new XrPasses();
+  private xrLineBuf: GPUBuffer | null = null;
+  private xrLineCount = 0;
+  private xrMarkerBuf: GPUBuffer | null = null;
+  private xrMarkerCount = 0;
+  /** The adapter was requested XR-compatible, so an XR session can bind this device. */
+  xrCompatible = false;
+  /** An XR session drives the frames: the desktop loop must not call frame(). */
+  xrActive = false;
 
   // HZB pyramid
   private hzb: GPUTexture | null = null;
@@ -1126,10 +1144,16 @@ export class Renderer {
     if (!navigator.gpu) {
       throw new Error('WebGPU not available in this browser');
     }
-    let adapter = await navigator.gpu.requestAdapter({
+    const preferred: GPURequestAdapterOptions = {
       powerPreference: this.gpuPreference === 'fallback' ? undefined : this.gpuPreference,
       forceFallbackAdapter: this.gpuPreference === 'fallback',
-    });
+    };
+    // XR-compatible first, so a headset session can bind this device later
+    // (WebXR/WebGPU binding). Where no adapter qualifies the request returns
+    // null and the viewer runs on a plain adapter — XR is then unavailable.
+    let adapter = await navigator.gpu.requestAdapter({ ...preferred, xrCompatible: true });
+    this.xrCompatible = adapter !== null;
+    adapter ??= await navigator.gpu.requestAdapter(preferred);
     // the preference is only a hint — if it resolves to nothing, take any adapter
     adapter ??= await navigator.gpu.requestAdapter();
     if (!adapter) {
@@ -1217,6 +1241,7 @@ export class Renderer {
       format: this.format,
       usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.COPY_SRC,
     });
+    this.xr.init(this.device, this.format);
 
     const dev = this.device;
     this.frameBuf = dev.createBuffer({
@@ -2795,6 +2820,8 @@ export class Renderer {
     this.normalTex = null;
     this.idTex = null;
     this.targetsMsaa = msaa;
+    this.targetW = w;
+    this.targetH = h;
 
     this.depth = dev.createTexture({
       label: 'depthTex',
@@ -3012,7 +3039,8 @@ export class Renderer {
     const usePost = opt.fastAA || anyEdges || opt.msaa4x || opt.debugBuf > 0 || opt.aoMode !== 0;
     // debug view 5 dispatches VBAO for display even with aoMode off
     const needAo = opt.aoMode !== 0 || opt.debugBuf === 5;
-    if (sizeChanged || !this.depth || this.targetsMsaa !== opt.msaa4x) {
+    const targetsSized = this.targetW === canvas.width && this.targetH === canvas.height;
+    if (sizeChanged || !this.depth || !targetsSized || this.targetsMsaa !== opt.msaa4x) {
       this.rebuildTargets(canvas.width, canvas.height, opt.msaa4x, usePost, needAo);
     } else if (this.targetsPost !== usePost || this.targetsAo !== needAo) {
       this.rebuildPostTargets(canvas.width, canvas.height, opt.msaa4x, usePost, needAo);
@@ -3313,7 +3341,14 @@ export class Renderer {
     const enc = dev.createCommandEncoder();
     const swapTex = this.context.getCurrentTexture();
     const swapView = swapTex.createView();
-    this.encodeScene(enc, opt, cam, { hold, cullActive, cullMode, sortActive, aoActive, usePost }, swapView, null);
+    this.encodeScene(
+      enc,
+      opt,
+      cam,
+      { hold, cullActive, cullMode, sortActive, aoActive, usePost, xrOverlay: false },
+      swapView,
+      null,
+    );
 
     // laser-scan panorama after post (outside the TAA history), under the
     // outline and view cube; redrawn on hold frames like them
@@ -3446,6 +3481,179 @@ export class Renderer {
     }
   }
 
+  // -----------------------------------------------------------------------------
+  // headset (XR) frames — driven by src/lib/xr/xrSession.ts
+  // -----------------------------------------------------------------------------
+
+  /** The device, for the XR session's WebGPU binding. */
+  get gpuDevice(): GPUDevice {
+    return this.device;
+  }
+
+  /** The colour format every pipeline renders to — the XR projection layer
+   *  is created with it, so the post pass can write the layer directly. */
+  get colorFormat(): GPUTextureFormat {
+    return this.format;
+  }
+
+  /** The newest controller-ray results (frameXr's `rays`, one per slot). */
+  get xrRayHits(): readonly (XrRayHit | null)[] {
+    return this.xr.hits;
+  }
+
+  /** An XR session takes over the frames: the desktop loop stops calling frame(). */
+  beginXr() {
+    this.xrActive = true;
+    this.xr.clearHits();
+  }
+
+  /** The session ended: the desktop loop takes over again. The render targets
+   *  are still eye-sized, which frame() notices and rebuilds; clearing the key
+   *  makes it render instead of idling on the pre-session frame. */
+  endXr() {
+    this.xrActive = false;
+    this.xrLineCount = 0;
+    this.xrMarkerCount = 0;
+    this.xr.clearHits();
+    this.lastKey = '';
+  }
+
+  /** The headset overlay: controller rays (line vertices as setHelperLines)
+   *  and hit reticles (marker instances, all opaque). Written every XR frame. */
+  setXrOverlay(lines: Float32Array, markers: Float32Array) {
+    this.xrLineCount = lines.length / 4;
+    this.xrMarkerCount = markers.length / MARKER_INSTANCE_FLOATS;
+    if (this.xrLineCount > 0) {
+      this.xrLineBuf = this.uploadVertices(this.xrLineBuf, lines, 'xrLineBuf');
+    }
+    if (this.xrMarkerCount > 0) {
+      this.xrMarkerBuf = this.uploadVertices(this.xrMarkerBuf, markers, 'xrMarkerBuf');
+    }
+  }
+
+  /**
+   * Render one headset frame: each view (eye) into its slice of the XR
+   * projection layer, through the same scene passes as the desktop frame.
+   * What makes no sense in a headset is off: TAA and VBAO (the head never
+   * holds still, so their accumulation never converges and smears), the idle
+   * and hold paths (a stale frame in a headset is nausea), and the outline,
+   * view cube and scan photo. A selection always tints, as its outline does
+   * not draw here. Each view is a submit of its own: the frame / cull / post
+   * uniforms are single buffers, and queue writes are ordered with submits,
+   * so view N's writes land after view N-1's passes ran. Both eyes share the
+   * targets (sized to the eye) and the cull's visibility history — the eyes
+   * see nearly the same thing, so each one's first pass starts from the
+   * other's visible set.
+   */
+  frameXr(views: readonly XrViewTarget[], xo: XrFrameOptions) {
+    if (views.length === 0 || this.lost) {
+      return;
+    }
+
+    const dev = this.device;
+    const base = this.options;
+    const opt: RenderOptions = {
+      ...base,
+      fastAA: false,
+      aoMode: 0,
+      debugBuf: 0,
+      msaa4x: xo.msaa,
+      orthographic: false,
+      freezeCull: false,
+      selectionTint: true,
+      bgColor: xo.ar ? [0, 0, 0] : base.bgColor,
+    };
+    this.timings.enabled = false;
+    const { width, height } = views[0].viewport;
+    const targetsFit = this.targetW === width && this.targetH === height && this.targetsMsaa === opt.msaa4x;
+    if (!this.depth || !targetsFit || !this.targetsPost || this.targetsAo) {
+      this.rebuildTargets(width, height, opt.msaa4x, true, false);
+    }
+    this.accumIdx = 0;
+    this.aoAccum = 0;
+    const cullMode = this.drawPath();
+    this.cullMode = cullMode;
+    for (const m of this.models) {
+      this.ensureLayout(m);
+    }
+    const sortActive = opt.transparencyBlend && opt.hasTransparency && cullMode !== 'full';
+    const cullActive = cullMode !== 'full' && this.models.length > 0;
+    const flags: SceneFlags = {
+      hold: false,
+      cullActive,
+      cullMode,
+      sortActive,
+      aoActive: false,
+      usePost: true,
+      xrOverlay: true,
+    };
+    const last = views.length - 1;
+    views.forEach((target, i) => {
+      const cam = target.camera;
+      this.writeFrameUniforms(opt, cam, sortActive);
+      this.pointsLayer.prepare([...cam.origin], cam.width, cam.height, cam.p11, 1);
+      if (cullActive) {
+        // the always-on cut only: the head moves every frame, and the larger
+        // moving-camera cut would hold the whole session at the lower quality
+        this.writeCullParams(opt, cam, opt.pxCutAlways, sortActive);
+      }
+      this.writePostParams(opt, cam, false, false, xo.ar);
+      const enc = dev.createCommandEncoder({ label: 'xrView' });
+      this.encodeScene(enc, opt, cam, flags, target.color, target.viewport);
+      if (target.depth) {
+        const { view, p10, p14 } = target.depth;
+        this.xr.encodeDepth(enc, this.depth!, opt.msaa4x, view, target.viewport, p10, p14, cam.near);
+      }
+      let rayJob: (() => void) | null = null;
+      if (i === last) {
+        if (xo.rays.some((r) => r !== null)) {
+          rayJob = this.xr.encodeRayPick(enc, this.depth!, this.idTex!, opt.msaa4x, xo.rays, cam);
+        }
+        // post wrote the eye into histB too (accumIdx 0, no hold)
+        if (xo.mirror && this.canvasEl && this.histB) {
+          const swap = this.context.getCurrentTexture();
+          this.xr.encodeMirror(enc, this.histB, swap.createView(), swap.width, swap.height);
+        }
+      }
+      dev.queue.submit([enc.finish()]);
+      rayJob?.();
+    });
+  }
+
+  /** Grow-or-reuse a vertex buffer and upload `data` into it. */
+  private uploadVertices(buf: GPUBuffer | null, data: Float32Array, label: string): GPUBuffer {
+    let out = buf;
+    if (!out || out.size < data.byteLength) {
+      out?.destroy();
+      out = this.device.createBuffer({
+        label,
+        size: Math.max(256, data.byteLength),
+        usage: GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST,
+      });
+    }
+    this.device.queue.writeBuffer(out, 0, data);
+
+    return out;
+  }
+
+  private drawXrOverlay(pass: GPURenderPassEncoder, msaa: boolean) {
+    if (this.xrLineCount > 0 && this.xrLineBuf) {
+      pass.setPipeline(msaa ? this.linePipeline4x : this.linePipeline1x);
+      pass.setBindGroup(0, this.lineBind);
+      pass.setVertexBuffer(0, this.xrLineBuf);
+      pass.draw(this.xrLineCount);
+    }
+    if (this.xrMarkerCount > 0 && this.xrMarkerBuf) {
+      const p = this.markerPipelines;
+      pass.setPipeline(msaa ? p.opaque4x : p.opaque1x);
+      pass.setBindGroup(0, this.markerBind);
+      pass.setVertexBuffer(0, this.sphereMeshBuf);
+      pass.setVertexBuffer(1, this.xrMarkerBuf);
+      pass.setIndexBuffer(this.sphereIndexBuf, 'uint16');
+      pass.drawIndexed(this.sphereIndexCount, this.xrMarkerCount);
+    }
+  }
+
   /** The Frame uniform for one view: slot 0 feeds the opaque passes, slot 256
    *  the blend pass (the same data plus its routing bits). Returns the blend
    *  copy, which the outline and pick passes patch for their own slots. */
@@ -3503,11 +3711,20 @@ export class Renderer {
     pf[57] = this.sortFar(cam.eye);
     pu[58] = Math.max(0, Math.floor(opt.newMeshletCap));
     pu[59] = opt.cullMoved ? 1 : 0;
+    pf[60] = cam.p20;
+    pf[61] = cam.p21;
     this.device.queue.writeBuffer(this.paramsBuf, 0, params);
   }
 
-  /** The post pass's parameters (PostParams in shaders/post.ts). */
-  private writePostParams(opt: RenderOptions, cam: ViewCamera, hold: boolean, aoActive: boolean) {
+  /** The post pass's parameters (PostParams in shaders/post.ts);
+   *  `transparentBg` = AR passthrough (alpha from geometry coverage). */
+  private writePostParams(
+    opt: RenderOptions,
+    cam: ViewCamera,
+    hold: boolean,
+    aoActive: boolean,
+    transparentBg = false,
+  ) {
     const pp = new ArrayBuffer(80);
     const pu = new Uint32Array(pp);
     const pf = new Float32Array(pp);
@@ -3529,7 +3746,8 @@ export class Renderer {
       (opt.flatMeshEdges ? 0 : 8192) | // flat-mesh edge lines OFF
       (opt.sketchRespectsEdgesOff ? 16384 : 0) |
       (opt.sketch && opt.sketchColorMode === 'fill' ? 32768 : 0) |
-      (opt.sketch && opt.sketchColorMode === 'edges' ? 65536 : 0);
+      (opt.sketch && opt.sketchColorMode === 'edges' ? 65536 : 0) |
+      (transparentBg ? POST_FLAG_TRANSPARENT_BG : 0);
     pf[3] = cam.near;
     pf.set([...opt.edgeColor, 1], 4);
     pf[8] = opt.depthThr;
@@ -3588,7 +3806,7 @@ export class Renderer {
     display: GPUTextureView,
     viewport: DisplayViewport | null,
   ) {
-    const { hold, cullActive, cullMode, sortActive, aoActive, usePost } = flags;
+    const { hold, cullActive, cullMode, sortActive, aoActive, usePost, xrOverlay } = flags;
     const sceneView = usePost ? this.sceneColor!.createView() : display;
     const clearColor = { r: opt.bgColor[0], g: opt.bgColor[1], b: opt.bgColor[2], a: 1 };
     const renderPipeline = opt.msaa4x ? this.renderPipeline4x : this.renderPipeline1x;
@@ -3796,6 +4014,9 @@ export class Renderer {
       this.pointsLayer.draw(pass2, opt.msaa4x);
       this.drawHelperLines(pass2, opt.msaa4x);
       this.drawMarkerSpheres(pass2, opt.msaa4x);
+      if (xrOverlay) {
+        this.drawXrOverlay(pass2, opt.msaa4x);
+      }
       pass2.end();
 
       drawBlendPass(enc);
@@ -3810,6 +4031,9 @@ export class Renderer {
       this.pointsLayer.draw(pass, opt.msaa4x);
       this.drawHelperLines(pass, opt.msaa4x);
       this.drawMarkerSpheres(pass, opt.msaa4x);
+      if (xrOverlay) {
+        this.drawXrOverlay(pass, opt.msaa4x);
+      }
       pass.end();
 
       drawBlendPass(enc);

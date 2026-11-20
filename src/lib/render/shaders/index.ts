@@ -19,3 +19,4 @@ export { outlineWgsl, postWgsl, vbaoWgsl } from './post';
 export { lineWgsl, renderVpWgsl, renderWgsl } from './scene';
 export { measureSnapWgsl } from './snap';
 export { cubeBlitWgsl, viewCubeWgsl } from './viewCube';
+export { XR_RAY_COUNT, xrDepthWgsl, xrMirrorWgsl, xrRayPickWgsl } from './xr';

@@ -4,6 +4,9 @@ import { HELPER_TAG_BIT } from './scene';
  *  A pure-black mesh filled at full strength would read as a hole punched in
  *  the paper, so black lands on a dark grey instead. */
 const SKETCH_GREY_FLOOR = 0.25;
+/** PostParams.flags bit: AR passthrough — alpha follows geometry coverage and
+ *  the background stays clear (the XR session's immersive-ar mode). */
+export const POST_FLAG_TRANSPARENT_BG = 131072;
 
 // VBAO compute — port of the native vbao.slang (Visibility Bitmask AO,
 // Therrien/Levesque/Gilet 2023). Screen-space horizon bitmask per slice;
@@ -200,7 +203,7 @@ struct PostParams {
   // 1024 hold; 2048 sketch; 4096 smooth-mesh edges OFF; 8192 flat-mesh edges
   // OFF; 16384 sketch respects the edge-off switches; 32768 sketch colour
   // fill (mesh colours washed onto the paper); 65536 sketch coloured edges
-  // (the ink takes the mesh colour)
+  // (the ink takes the mesh colour); POST_FLAG_TRANSPARENT_BG: AR passthrough
   flags: u32,
   cam_near: f32,
   edge_color: vec4f,
@@ -518,6 +521,20 @@ fn fs(@builtin(position) fpos: vec4f) -> PostOut {
   } else {
     out.display = vec4f(col, 1.0);
     out.history = vec4f(col, 1.0);
+  }
+  if ((pp.flags & ${POST_FLAG_TRANSPARENT_BG}u) != 0u) {
+    // AR passthrough: alpha = the share of samples holding geometry or a
+    // helper overlay (the XR controller rays write no depth, only the tag).
+    // The scene was cleared to black, so a partly covered pixel's colour is
+    // already premultiplied; the uncovered background goes fully clear.
+    var cover = 0.0;
+    for (var s = 0; s < SAMPLES; s++) {
+      let hit = ld_depth(xy, vec2i(0, 0), dims, s) > 1e-7;
+      let helper = (ld_tag(xy, vec2i(0, 0), dims, s) & ${HELPER_TAG_BIT}u) != 0u;
+      if (hit || helper) { cover += 1.0; }
+    }
+    let a = cover / f32(SAMPLES);
+    out.display = vec4f(select(out.display.rgb, vec3f(0.0), a == 0.0), a);
   }
   return out;
 }
