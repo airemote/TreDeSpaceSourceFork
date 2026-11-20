@@ -13,10 +13,11 @@ const CONTROLS: readonly Readonly<{ input: string; action: string }>[] = [
 ];
 
 const SETUP: readonly string[] = [
-  'In the headset browser open chrome://flags, turn on “WebXR experimental features” and the WebGPU entries, and restart the browser.',
+  'The Quest browser runs WebXR over WebGPU as it ships from version 156. On 146–155, open chrome://flags, enable webxr-layers, webxr-projection-layers, webxr-webgpu-binding and webxr-experiments, then fully restart the browser (its Relaunch button, or force-stop it) — closing the window is not enough.',
   'Open the viewer in the headset browser over HTTPS (from a PC dev server: npm run dev -- --host, then https://<pc-address>:5173 and accept the certificate).',
-  'A PC with a headset as its display works too (Windows only — Chrome has no WebXR on Linux).',
+  'A PC with a headset as its display works too (Windows only — Chrome has no WebXR on Linux). Desktop Chrome still ships the WebXR/WebGPU binding switched off, so it needs the same flags.',
   'In AR, release the grip or A to save the alignment: the same scene opens aligned at that place next time (where the headset keeps anchors). Home › Camera › Unpin forgets it.',
+  'A headset keeps only a few anchors per site (8 on a Quest): the viewer keeps the 7 newest scenes and deletes older and unpinned anchors at the next AR session.',
 ];
 
 // -----------------------------------------------------------------------------

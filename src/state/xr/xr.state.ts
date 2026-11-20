@@ -1,7 +1,10 @@
 import { createStore } from '@treDeSpaceUI/lib/createStore';
-import type { XrMode, XrRunSettings } from '../../lib/xr/xrSession';
+import type { XrMode, XrRefreshRate, XrRunSettings } from '../../lib/xr/xrSession';
 
-export type { XrMode, XrRunSettings };
+export type { XrMode, XrRefreshRate, XrRunSettings };
+
+/** Every refresh-rate choice, in menu order. */
+export const XR_REFRESH_RATES: readonly XrRefreshRate[] = ['default', '72', '90', '120'];
 
 /** What this browser and headset can start; `reason` explains a missing mode. */
 export type XrSupport = Readonly<{ vr: boolean; ar: boolean; reason: string | null }>;
@@ -21,8 +24,10 @@ export type XrState = Readonly<{
 }>;
 
 /** Settings › XR defaults. Render scale and foveation are the frame-rate levers
- *  on a standalone headset; depth hand-off stays off until checked on device. */
+ *  on a standalone headset; depth hand-off stays off until checked on device;
+ *  the refresh rate stays the headset's own (72 Hz on a Quest). */
 export const XR_SETTINGS_DEFAULTS: XrRunSettings = {
+  refreshRate: 'default',
   renderScale: 0.8,
   msaa: true,
   foveation: 0.5,

@@ -45,8 +45,12 @@ import {
 
 export type XrMode = 'vr' | 'ar';
 
+/** Headset display rate (Hz) to ask for; 'default' leaves the headset's own. */
+export type XrRefreshRate = 'default' | '72' | '90' | '120';
+
 /** Per-session render settings (Settings › XR). */
 export type XrRunSettings = Readonly<{
+  refreshRate: XrRefreshRate;
   /** Projection-layer resolution scale (1 = the headset's recommended size). */
   renderScale: number;
   msaa: boolean;
@@ -69,6 +73,8 @@ export type XrSessionHooks = Readonly<{
   /** Select (trigger, or a hand pinch): the packed global item id under the ray (null = nothing). */
   onSelect: (globalId: number | null) => void;
   onAlignmentSaved: (alignment: XrSavedAlignment) => void;
+  /** These persistent anchors are off the headset now (deleted, or unknown to it). */
+  onAnchorsDeleted: (ids: readonly string[]) => void;
   onFps: (fps: number) => void;
   onMessage: (text: string) => void;
   /** The session is over; `pose` is where the user stood (world), if known. */
@@ -84,6 +90,9 @@ export type XrStartOptions = Readonly<{
   near: number;
   /** A saved AR alignment for this scene, restored when the anchor is found. */
   alignment: XrSavedAlignment | null;
+  /** Persistent anchors this app made and no longer uses (unpinned, evicted,
+   *  replaced): an AR session deletes them from the headset as it starts. */
+  forgetAnchors: readonly string[];
   hooks: XrSessionHooks;
 }>;
 
@@ -100,6 +109,9 @@ type ControllerFrame = Readonly<{ pad: PadState; ray: Mat4d | null; grip: Mat4d 
 /** Far plane handed to the session (the renderer's own projection is infinite;
  *  this only shapes the headset matrices the depth hand-off converts into). */
 const XR_DEPTH_FAR = 100_000;
+/** Asked for in VR and AR: some builds gate projection layers behind 'layers',
+ *  and without 'hand-tracking' a browser may drop hand input (pinch = select). */
+const OPTIONAL_FEATURES: readonly string[] = ['layers', 'hand-tracking'];
 /** How far a ray is marched for a hit, and drawn when it hits nothing (m). */
 const RAY_MAX_DIST = 1000;
 const RAY_MISS_LENGTH = 5;
@@ -129,6 +141,49 @@ function errorMessage(err: unknown, fallback: string): string {
 
 function slotOf(source: XrInputSource): number {
   return source.handedness === 'left' ? LEFT : RIGHT;
+}
+
+/** How the anchors API says "no such anchor" (an unknown UUID). */
+function isInvalidState(err: unknown): boolean {
+  return err instanceof DOMException && err.name === 'InvalidStateError';
+}
+
+/** The array-layer / mip slice of a sub-image's view descriptor, without the
+ *  format or aspect a browser may fill in for the colour texture: the depth
+ *  texture shares the slice, not the format. */
+function depthSliceOf(desc: GPUTextureViewDescriptor): GPUTextureViewDescriptor {
+  return {
+    dimension: desc.dimension,
+    baseArrayLayer: desc.baseArrayLayer,
+    arrayLayerCount: desc.arrayLayerCount,
+    baseMipLevel: desc.baseMipLevel,
+    mipLevelCount: desc.mipLevelCount,
+  };
+}
+
+/** Ask for the display rate picked in Settings › XR — the nearest one the
+ *  headset offers. 'default' leaves the headset's own rate. */
+async function applyRefreshRate(session: XrSession, rate: XrRefreshRate, say: (text: string) => void): Promise<void> {
+  if (rate === 'default') {
+    return;
+  }
+
+  const supported = session.supportedFrameRates;
+  if (!supported || supported.length === 0 || !session.updateTargetFrameRate) {
+    say('XR: this headset does not let a page pick its refresh rate — running at its default');
+    return;
+  }
+
+  const wanted = Number(rate);
+  const nearest = Array.from(supported).reduce((best, r) =>
+    Math.abs(r - wanted) < Math.abs(best - wanted) ? r : best,
+  );
+  try {
+    await session.updateTargetFrameRate(nearest);
+    say(`XR: refresh rate ${Math.round(nearest)} Hz`);
+  } catch (err) {
+    say(`XR: the headset kept its own refresh rate — ${errorMessage(err, `${Math.round(nearest)} Hz was refused`)}`);
+  }
 }
 
 // -----------------------------------------------------------------------------
@@ -179,6 +234,7 @@ class XrRunner {
     if (this.o.mode === 'ar' && this.o.alignment) {
       void this.restoreAlignment(this.o.alignment);
     }
+    void this.deleteAnchors(this.o.forgetAnchors);
   }
 
   stop(): WorldPose | null {
@@ -215,7 +271,7 @@ class XrRunner {
         color: sub.colorTexture.createView(desc),
         viewport: sub.viewport,
         depth: sub.depthStencilTexture
-          ? { view: sub.depthStencilTexture.createView(desc), p10: proj[10], p14: proj[14] }
+          ? { view: sub.depthStencilTexture.createView(depthSliceOf(desc)), p10: proj[10], p14: proj[14] }
           : null,
       };
     });
@@ -413,14 +469,35 @@ class XrRunner {
         }
         const previous = this.savedAnchorId;
         this.savedAnchorId = id;
-        if (previous && previous !== id) {
-          void this.session.deletePersistentAnchor?.(previous).catch(() => undefined);
-        }
         this.o.hooks.onAlignmentSaved({ anchor: id, offset: Array.from(offset) });
+        if (previous && previous !== id) {
+          void this.deleteAnchors([previous]);
+        }
       })
       .catch((err: unknown) => {
-        this.o.hooks.onMessage(`XR: could not save the alignment — ${errorMessage(err, 'anchor failed')}`);
+        this.o.hooks.onMessage(
+          `XR: could not save the alignment — ${errorMessage(err, 'anchor failed')}. A headset keeps few anchors per site (8 on Quest): Home › Camera › Unpin frees the saved ones at the next AR session.`,
+        );
       });
+  }
+
+  /** Delete persistent anchors from the headset. Reports the ones that are
+   *  gone — deleted, or already unknown to it — so they are not tried again;
+   *  any other failure leaves them for the next session. */
+  private async deleteAnchors(ids: readonly string[]): Promise<void> {
+    const session = this.session;
+    if (this.o.mode !== 'ar' || ids.length === 0 || !session.deletePersistentAnchor) {
+      return;
+    }
+
+    const results = await Promise.allSettled(ids.map((id) => session.deletePersistentAnchor?.(id)));
+    const gone = ids.filter((_, i) => {
+      const r = results[i];
+      return r.status === 'fulfilled' || isInvalidState(r.reason);
+    });
+    if (gone.length > 0) {
+      this.o.hooks.onAnchorsDeleted(gone);
+    }
   }
 
   private async restoreAlignment(alignment: XrSavedAlignment): Promise<void> {
@@ -460,7 +537,7 @@ export function xrUnavailableReason(renderer: Renderer): string | null {
     return 'This browser has no WebXR (use the headset browser, or a Chromium browser on Windows — Linux has none).';
   }
   if (!getGpuBindingConstructor()) {
-    return 'WebXR is here, but not over WebGPU: turn on the WebXR/WebGPU flags (Settings › XR) and restart the browser.';
+    return 'WebXR is here, but not over WebGPU: update the headset browser (Quest 156+), or turn on the WebXR/WebGPU flags and fully restart it (Settings › XR › Headset setup).';
   }
   if (!renderer.xrCompatible) {
     return 'The GPU adapter is not XR-compatible — reload the page with the headset connected.';
@@ -487,7 +564,7 @@ export async function startXrSession(o: XrStartOptions): Promise<Result<XrSessio
   try {
     session = await xr.requestSession(o.mode === 'ar' ? 'immersive-ar' : 'immersive-vr', {
       requiredFeatures: ['webgpu'],
-      optionalFeatures: o.mode === 'ar' ? ['anchors'] : [],
+      optionalFeatures: o.mode === 'ar' ? ['anchors', ...OPTIONAL_FEATURES] : OPTIONAL_FEATURES,
     });
   } catch (err) {
     return { error: { err, msg: errorMessage(err, `The headset refused the ${o.mode.toUpperCase()} session`) } };
@@ -537,6 +614,7 @@ export async function startXrSession(o: XrStartOptions): Promise<Result<XrSessio
     runner = new XrRunner(o, session, binding, layer, space);
     o.renderer.beginXr();
     runner.start();
+    void applyRefreshRate(session, o.settings.refreshRate, o.hooks.onMessage);
   } catch (err) {
     return fail(err, errorMessage(err, 'Could not set up the headset layer'));
   }

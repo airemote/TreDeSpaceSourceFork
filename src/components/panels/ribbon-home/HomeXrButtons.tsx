@@ -95,7 +95,7 @@ export function HomeXrButtons() {
         disabled={s.alignmentCount === 0}
         tooltip={
           s.alignmentCount > 0
-            ? `Unpin the model from the real world: forget the ${s.alignmentCount} saved AR alignment(s), so the next AR session starts from the desktop view instead of where you last lined the model up`
+            ? `Unpin the model from the real world: forget the ${s.alignmentCount} saved AR alignment(s), so the next AR session starts from the desktop view instead of where you last lined the model up (and deletes their anchors from the headset)`
             : 'Unpin the model from the real world — nothing is pinned yet. In AR, releasing a grab or A pins the model where you put it, for the next AR session too.'
         }
         shortcut="home.xr.forgetAlignments"

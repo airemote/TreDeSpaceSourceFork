@@ -1,8 +1,19 @@
-import { Checkbox, NumberInput } from '@treDeSpaceUI/widgets';
+import { Checkbox, NumberInput, Select, type SelectOption } from '@treDeSpaceUI/widgets';
 import { describeXrSupport, xrActions } from '../../../../state/xr/xr.actions';
-import { xrSettingsState, xrState } from '../../../../state/xr/xr.state';
+import { type XrRefreshRate, xrSettingsState, xrState } from '../../../../state/xr/xr.state';
 import { SettingsSection } from '../SettingsSection';
 import { XrHelp } from './XrHelp';
+
+// -----------------------------------------------------------------------------
+// Constants
+// -----------------------------------------------------------------------------
+
+const REFRESH_RATES: readonly SelectOption<XrRefreshRate>[] = [
+  { value: 'default', label: 'Headset default', hint: '72 Hz on a Quest' },
+  { value: '72', label: '72 Hz' },
+  { value: '90', label: '90 Hz' },
+  { value: '120', label: '120 Hz', hint: 'light scenes only' },
+];
 
 // -----------------------------------------------------------------------------
 // Render
@@ -26,6 +37,15 @@ export function XrTab() {
       }
     >
       <div className="text-slate-400 text-xs">{describeXrSupport(support)}</div>
+      <Select
+        label="Refresh rate"
+        labelPosition="split"
+        value={s.refreshRate}
+        options={REFRESH_RATES}
+        clearable={false}
+        tooltip="Higher is smoother but leaves less time per frame — the scene must keep up, or the headset drops frames. The nearest rate the headset offers is used; takes effect at the next session."
+        onChange={(x) => xrActions.updateSettings({ refreshRate: x ?? 'default' })}
+      />
       <NumberInput
         label="Render scale"
         labelPosition="split"

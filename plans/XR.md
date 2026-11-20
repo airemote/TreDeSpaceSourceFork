@@ -62,13 +62,41 @@
   the world transform relative to it is stored per scene (loaded model names)
   in `tds:xrAlignments`. A later AR session on that scene restores it once the
   headset relocalises the anchor; grabbing again replaces it.
+  A Quest keeps only 8 persistent anchors per site (none in private mode;
+  clearing the site's history deletes them), and deleting one needs a running
+  session. So anchors the viewer no longer uses — replaced, unpinned, or the
+  oldest scenes beyond 7 (`anchorSlots.ts`) — wait in `tds:xrForgottenAnchors`
+  until the next AR session deletes them (an unknown UUID counts as gone). It
+  never deletes anchors it did not make (`session.persistentAnchors` would
+  list a host page's too, on a shared origin).
+
+**Platform facts (re-checked 2026-11-20)**
+
+- Quest browser 156.0 (2026-11-13) lists "WebGPU in WebXR" without the
+  "experimental" label of 146.0–155. On those older builds the flags are
+  `webxr-layers`, `webxr-projection-layers`, `webxr-webgpu-binding`,
+  `webxr-experiments`, and the browser needs a full restart (closing the
+  window is not enough — `XRGPUBinding` stays undefined). Desktop Chrome
+  still ships the binding off.
+- WebXR runs at 72 Hz on a Quest by default; `updateTargetFrameRate` is
+  Settings › XR › Refresh rate.
+- Real-world occlusion (the depth-sensing module) hands its depth texture
+  over the WebGL binding only (`XRWebGLBinding.getDepthInformation`); there
+  is no WebGPU path yet, so the model always draws over passthrough.
+- WebGPU has no multiview: one pass per eye is what every engine does.
 - **Depth hand-off** is an option (Settings › XR, default off): our depth is
   re-expressed in the headset projection's convention (`xrDepthWgsl`).
 - **Desktop mirror**: the post pass also writes the eye into the TAA history
   texture (unused in a headset); the last eye is letterboxed onto the canvas.
 
-**Verify on device** (Quest 3 browser, flags on — Settings › XR lists them)
+**Verify on device** (Quest 3 browser 156+, or older with the flags on — Settings › XR lists them)
 
+0. Before XR: the desktop view renders in the headset browser at all. In its
+   console, `(await navigator.gpu.requestAdapter()).limits.maxStorageBuffersPerShaderStage`
+   must be ≥ 11 — the second cull pass binds 11 (8 shared, 2 draw-list,
+   1 budget) and Android adapters commonly offer 10. Note too whether
+   `chromium-experimental-multi-draw-indirect` is in `adapter.features`
+   (without it the vertex-pull path runs).
 1. Session starts; both eyes render; the scale is 1:1 and up is up.
 2. Frame rate on a small and on the dense model (Home › Camera tooltip shows fps
    while running) — the phase-3 question. Levers: render scale, foveation,
@@ -84,6 +112,10 @@
 8. Depth hand-off on: steadier reprojection, no swimming.
 9. `getViewSubImage` viewport: the code assumes it starts at (0, 0) and both
    eyes are the same size (true for a texture-array projection layer).
+10. Hands: pinch selects, with no controllers in hand.
+11. Refresh rate 90 / 120: the console line confirms it; fps follows.
+12. Anchors: Unpin, start AR again — no error; nine scenes aligned in turn —
+    the ninth still saves.
 
 ## Goal / motivation
 

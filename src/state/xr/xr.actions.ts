@@ -5,6 +5,7 @@
 import { consoleActions } from '../../components/panels/console/console.actions';
 import type { Renderer } from '../../lib/render/renderer';
 import { storageKey } from '../../lib/storageKeys';
+import { scenesToEvict } from '../../lib/xr/anchorSlots';
 import { getXr } from '../../lib/xr/webxr';
 import type { WorldPose } from '../../lib/xr/xrMath';
 import {
@@ -16,6 +17,7 @@ import {
 import { navState } from '../viewer/nav.state';
 import { getRenderer, viewerActions } from '../viewer/viewer.actions';
 import {
+  XR_REFRESH_RATES,
   XR_SETTINGS_DEFAULTS,
   type XrMode,
   type XrRunSettings,
@@ -28,8 +30,11 @@ import {
 // Types
 // -----------------------------------------------------------------------------
 
+/** A saved alignment and when (ms) — the oldest is dropped first. */
+type StoredAlignment = XrSavedAlignment & Readonly<{ savedAt: number }>;
+
 /** Saved AR alignments, keyed by scene (the loaded models). */
-type AlignmentMap = Record<string, XrSavedAlignment>;
+type AlignmentMap = Record<string, StoredAlignment>;
 
 // -----------------------------------------------------------------------------
 // Constants
@@ -37,7 +42,13 @@ type AlignmentMap = Record<string, XrSavedAlignment>;
 
 const SETTINGS_KEY = storageKey('xr');
 const ALIGNMENTS_KEY = storageKey('xrAlignments');
+/** Anchors this viewer made and no longer uses, waiting for an AR session to
+ *  delete them from the headset (the anchors API needs a running session). */
+const FORGOTTEN_KEY = storageKey('xrForgottenAnchors');
 const MATRIX_SIZE = 16;
+/** A Quest keeps at most 8 persistent anchors per site. One slot stays free:
+ *  a new alignment is saved before the one it replaces is deleted. */
+const MAX_KEPT_ALIGNMENTS = 7;
 
 // -----------------------------------------------------------------------------
 // Live handles
@@ -56,14 +67,18 @@ function isRecord(v: unknown): v is Record<string, unknown> {
   return typeof v === 'object' && v !== null && !Array.isArray(v);
 }
 
-function isAlignment(v: unknown): v is XrSavedAlignment {
-  return (
-    isRecord(v) &&
-    typeof v.anchor === 'string' &&
-    Array.isArray(v.offset) &&
-    v.offset.length === MATRIX_SIZE &&
-    v.offset.every((n: unknown) => typeof n === 'number')
-  );
+function isMatrix(v: unknown): v is number[] {
+  return Array.isArray(v) && v.length === MATRIX_SIZE && v.every((n: unknown) => typeof n === 'number');
+}
+
+/** A stored alignment, or null for a malformed one (older entries carry no
+ *  `savedAt` and count as the oldest). */
+function parseAlignment(v: unknown): StoredAlignment | null {
+  if (!isRecord(v) || typeof v.anchor !== 'string' || !isMatrix(v.offset)) {
+    return null;
+  }
+
+  return { anchor: v.anchor, offset: v.offset, savedAt: readNumber(v.savedAt, 0) };
 }
 
 function readJson(key: string): unknown {
@@ -91,6 +106,10 @@ function readBoolean(v: unknown, fallback: boolean): boolean {
   return typeof v === 'boolean' ? v : fallback;
 }
 
+function readChoice<T extends string>(v: unknown, choices: readonly T[], fallback: T): T {
+  return choices.find((c) => c === v) ?? fallback;
+}
+
 /** XR settings from storage or a settings file — unknown or mistyped fields
  *  fall back to the defaults. */
 function parseSettings(value: unknown): XrRunSettings {
@@ -101,6 +120,7 @@ function parseSettings(value: unknown): XrRunSettings {
   const d = XR_SETTINGS_DEFAULTS;
 
   return {
+    refreshRate: readChoice(value.refreshRate, XR_REFRESH_RATES, d.refreshRate),
     renderScale: readNumber(value.renderScale, d.renderScale),
     msaa: readBoolean(value.msaa, d.msaa),
     foveation: readNumber(value.foveation, d.foveation),
@@ -115,8 +135,9 @@ function loadAlignments(): AlignmentMap {
   const out: AlignmentMap = {};
   if (isRecord(stored)) {
     for (const [key, value] of Object.entries(stored)) {
-      if (isAlignment(value)) {
-        out[key] = value;
+      const alignment = parseAlignment(value);
+      if (alignment) {
+        out[key] = alignment;
       }
     }
   }
@@ -124,11 +145,62 @@ function loadAlignments(): AlignmentMap {
   return out;
 }
 
-function saveAlignment(scene: string, alignment: XrSavedAlignment): void {
-  const map = { ...loadAlignments(), [scene]: alignment };
+function writeAlignments(map: AlignmentMap): void {
   writeJson(ALIGNMENTS_KEY, map);
   xrState.set({ alignmentCount: Object.keys(map).length });
+}
+
+function loadForgotten(): string[] {
+  const stored = readJson(FORGOTTEN_KEY);
+
+  return Array.isArray(stored) ? stored.filter((id: unknown): id is string => typeof id === 'string') : [];
+}
+
+function queueForDeletion(ids: readonly string[]): void {
+  if (ids.length === 0) {
+    return;
+  }
+
+  writeJson(FORGOTTEN_KEY, [...new Set([...loadForgotten(), ...ids])]);
+}
+
+function markAnchorsDeleted(ids: readonly string[]): void {
+  const gone = new Set(ids);
+  writeJson(
+    FORGOTTEN_KEY,
+    loadForgotten().filter((id) => !gone.has(id)),
+  );
+}
+
+/** A new alignment for a scene replaces its old one, whose anchor is queued
+ *  for deletion (the session deletes it right away and reports back). */
+function saveAlignment(scene: string, alignment: XrSavedAlignment): void {
+  const map = loadAlignments();
+  const previous = map[scene];
+  if (previous && previous.anchor !== alignment.anchor) {
+    queueForDeletion([previous.anchor]);
+  }
+  writeAlignments({ ...map, [scene]: { ...alignment, savedAt: Date.now() } });
   consoleActions.log('info', 'XR: alignment saved — this scene opens aligned here next time');
+}
+
+/** Keep the saved alignments within what the headset can hold: the oldest
+ *  (never the current scene's) are dropped and their anchors queued for
+ *  deletion. Runs before an AR session starts. */
+function evictOldAlignments(scene: string): void {
+  const map = loadAlignments();
+  const savedAt = Object.fromEntries(Object.entries(map).map(([key, a]) => [key, a.savedAt]));
+  const evicted = scenesToEvict(savedAt, scene, MAX_KEPT_ALIGNMENTS);
+  if (evicted.length === 0) {
+    return;
+  }
+
+  queueForDeletion(evicted.map((key) => map[key].anchor));
+  writeAlignments(Object.fromEntries(Object.entries(map).filter(([key]) => !evicted.includes(key))));
+  consoleActions.log(
+    'info',
+    `XR: dropped the ${evicted.length} oldest saved alignment(s) — a headset keeps only a few anchors per site`,
+  );
 }
 
 /** The scene an AR alignment belongs to: the loaded models, by name. */
@@ -250,6 +322,9 @@ export const xrActions = {
 
     xrState.set({ status: { kind: 'starting', mode }, lastError: null });
     const scene = sceneKey(renderer);
+    if (mode === 'ar') {
+      evictOldAlignments(scene);
+    }
     const cam = renderer.camera;
     const settings = xrSettingsState.get();
     // a standalone headset has no audience at its 2D page: the mirror is pure cost there
@@ -261,10 +336,12 @@ export const xrActions = {
       start: { eye: cam.eye(), forward: cam.forward() },
       near: cam.near,
       alignment: mode === 'ar' ? (loadAlignments()[scene] ?? null) : null,
+      forgetAnchors: mode === 'ar' ? loadForgotten() : [],
       hooks: {
         speeds: () => ({ move: navState.get().flySpeed, sprint: navState.get().flyShift }),
         onSelect: (id) => void viewerActions.selectFromPick(id, false),
         onAlignmentSaved: (alignment) => saveAlignment(scene, alignment),
+        onAnchorsDeleted: markAnchorsDeleted,
         onFps: (fps) => xrState.set((s) => (s.status.kind === 'running' ? { status: { ...s.status, fps } } : s)),
         onMessage: (text) => consoleActions.log('info', text),
         onEnd: (pose) => handleEnd(renderer, mode, pose),
@@ -300,11 +377,12 @@ export const xrActions = {
     xrSettingsState.set(parseSettings(value));
   },
 
-  /** Forget every saved AR alignment (the next AR session starts from the
-   *  desktop view). Anchors already kept by the headset are left there. */
+  /** Unpin: forget every saved AR alignment (the next AR session starts from
+   *  the desktop view). Their anchors are queued — the next AR session
+   *  deletes them from the headset, freeing its few per-site slots. */
   forgetAlignments(): void {
-    writeJson(ALIGNMENTS_KEY, {});
-    xrState.set({ alignmentCount: 0 });
-    consoleActions.log('info', 'XR: saved AR alignments forgotten');
+    queueForDeletion(Object.values(loadAlignments()).map((a) => a.anchor));
+    writeAlignments({});
+    consoleActions.log('info', 'XR: saved AR alignments forgotten — the next AR session deletes their anchors');
   },
 };

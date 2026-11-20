@@ -7,6 +7,18 @@ version at release time. See CLAUDE.md for the rule.
 Entries from before the stable pilot (0.26.1) have been removed.
 
 - **2026.11.20** (>0.26.7):
+  XR, checked against the current headset platform: a Quest keeps only 8
+  persistent anchors per site, and Unpin used to forget alignments in the
+  viewer only — their anchors stayed on the headset until saving failed. Now
+  Unpin, a replaced alignment and the oldest scenes beyond 7 queue their
+  anchors, and the next AR session deletes them from the headset. Settings ›
+  XR gains a refresh-rate choice (headset default = 72 Hz on a Quest; the
+  nearest offered rate is used), and its setup notes follow the Quest browser
+  156, which runs WebXR over WebGPU without flags (146–155 still need four
+  flags and a full browser restart). Sessions also ask for 'layers' and
+  'hand-tracking' (some builds gate projection layers, or drop hand pinch,
+  without them), and the depth hand-off view no longer reuses the colour
+  view's descriptor.
   XR headsets (VR and passthrough AR) over WebXR + WebGPU, aimed at the Quest 3
   browser and at a PC with a headset as its display. Home › Camera enters or
   leaves a session from the current camera; on exit the desktop camera lands
@@ -19,8 +31,8 @@ Entries from before the stable pilot (0.26.1) have been removed.
   Unpin drops them). Settings › XR: render scale, foveation, snap
   angle, MSAA, desktop mirror, depth hand-off to the headset. In a headset
   TAA, ambient occlusion, the outline and the view cube are off; a selection
-  always tints. The binding is still behind browser flags (Settings › XR
-  lists the setup); built without a headset to test on, so device findings
+  always tints. Older headset browsers keep the binding behind flags
+  (Settings › XR lists the setup); built without a headset to test on, so device findings
   go into `plans/XR.md`.
   The cull's occlusion test now takes the projection's off-centre terms (a
   headset eye's frustum is asymmetric; the desktop passes zero), and the

@@ -85,7 +85,11 @@ export interface XrSession extends EventTarget {
   updateRenderState(state: XrRenderStateInit): void;
   end(): Promise<void>;
   restorePersistentAnchor?(uuid: string): Promise<XrAnchor>;
+  /** Rejects with InvalidStateError for a UUID the browser does not know. */
   deletePersistentAnchor?(uuid: string): Promise<void>;
+  /** Display rates the headset offers (Hz) — frame-rate API, where present. */
+  readonly supportedFrameRates?: Float32Array;
+  updateTargetFrameRate?(rate: number): Promise<void>;
 }
 
 export type XrSessionInit = Readonly<{
@@ -154,8 +158,8 @@ export function getXr(): XrSystem | null {
   return typeof navigator !== 'undefined' && navigator.xr ? navigator.xr : null;
 }
 
-/** `XRGPUBinding` — only where the browser exposes WebXR over WebGPU (behind
- *  flags as of 2026-11). */
+/** `XRGPUBinding` — only where the browser exposes WebXR over WebGPU (the
+ *  Quest browser from 156 on; behind flags on older builds and desktop Chrome). */
 export function getGpuBindingConstructor(): XrGpuBindingConstructor | null {
   const ctor: unknown = Reflect.get(globalThis, 'XRGPUBinding');
 

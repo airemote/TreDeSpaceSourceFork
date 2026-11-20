@@ -33,6 +33,7 @@ export const VIEWER_STORAGE_NAMES = [
   'viewpointViewer',
   'xr',
   'xrAlignments',
+  'xrForgottenAnchors',
   // reset placeholders (globalReset.ts) with no store behind them yet
   'viewpoints',
   'labels',
