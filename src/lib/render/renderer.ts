@@ -120,6 +120,7 @@ import {
 } from './shaders';
 import { SORT_CLEAR_BYTES, SORT_COUNT_WORD, sortScanWgsl, sortScatterWgsl } from './shaders/cull';
 import { unitSphereMesh } from './sphereMesh';
+import type { ViewCamera } from './viewCamera';
 import { type NavGizmoOptions, ViewCubePass } from './viewCubePass';
 import { type AdapterHints, readDeviceMemoryGb } from './vramHint';
 
@@ -180,6 +181,23 @@ const fmtHit = (h: SnapHit | null): string =>
     : 'miss';
 
 type Ray = { origin: [number, number, number]; dir: [number, number, number] };
+
+/** The renderer's live option set (`Renderer.options`). */
+type RenderOptions = Renderer['options'];
+
+/** What one view's scene encode does — decided per frame by the caller. */
+type SceneFlags = Readonly<{
+  /** Re-present the converged accumulation; encode nothing scene-side. */
+  hold: boolean;
+  cullActive: boolean;
+  cullMode: DrawPath;
+  sortActive: boolean;
+  aoActive: boolean;
+  usePost: boolean;
+}>;
+
+/** Where in the display target the post pass draws (null = the whole target). */
+type DisplayViewport = Readonly<{ x: number; y: number; width: number; height: number }>;
 
 /** Unproject device pixel (fx, fy) at NDC depth d through an inverted
  *  view-projection; null when degenerate. */
@@ -3235,28 +3253,26 @@ export class Renderer {
       vpRel[c * 4 + 0] += jx * vpRel[c * 4 + 3];
       vpRel[c * 4 + 1] += jy * vpRel[c * 4 + 3];
     }
-    const frameData = new ArrayBuffer(FRAME_SIZE);
-    const ff = new Float32Array(frameData);
-    ff.set(vpRel, FRAME_SLOT.viewProj);
-    ff.set([...origin, 0], FRAME_SLOT.origin);
-    ff[FRAME_SLOT.darkFloor] = opt.darkFloor;
-    ff.set([eye[0] - origin[0], eye[1] - origin[1], eye[2] - origin[2], 1], FRAME_SLOT.eye);
-    const fu = new Uint32Array(frameData);
-    fu[FRAME_SLOT.flags] = opt.meshletVis ? 1 : 0;
-    fu[FRAME_SLOT.flags + 1] = opt.suppressTintOnOverride ? 1 : 0;
-    fu[FRAME_SLOT.flags + 2] = opt.transparencyBlend ? 1 : 0; // bit1 (blend pass) set in slot 2
-    fu[FRAME_SLOT.flags + 3] = this.accumIdx; // alpha-hash seed
-    // ortho: directional headlight along the view axis (surface -> light = -fwd)
-    const fwd = this.camera.forward();
-    ff.set([-fwd[0], -fwd[1], -fwd[2], opt.orthographic ? 1 : 0], FRAME_SLOT.light);
-    ff.set([...opt.ambientColor, opt.ambientIntensity], FRAME_SLOT.ambient);
-    ff.set([...opt.headlightColor, opt.headlightIntensity], FRAME_SLOT.headlight);
-    // selection REPLACES the color (a = blend); outline-only style zeroes the
-    // blend so selected items keep their true color (outline shows instead)
-    ff.set([...opt.selectionColor, opt.selectionTint ? 1.0 : 0.0], FRAME_SLOT.selColor);
-    ff.set([...opt.bgColor, opt.backdropFade], FRAME_SLOT.backdrop);
-    dev.queue.writeBuffer(this.frameBuf, 0, frameData);
-    this.pointsLayer.prepare(origin, canvas.width, canvas.height, this.camera.lastP11, this.dpr * this.captureScale);
+    const cam: ViewCamera = {
+      width: canvas.width,
+      height: canvas.height,
+      view: this.camera.lastView,
+      viewProj: vp,
+      viewProjRel: vpRel,
+      origin,
+      eye,
+      forward: this.camera.forward(),
+      p00: this.camera.lastP00,
+      p11: this.camera.lastP11,
+      p20: 0,
+      p21: 0,
+      near: this.camera.near,
+      ortho: opt.orthographic,
+      orthoNear: this.camera.orthoNear,
+      orthoFar: this.camera.orthoFar,
+      orthoHalfH: this.camera.orthoHalfH,
+      focusDist: this.camera.focusDist,
+    };
     // vp = vertex pulling (core WebGPU); mdi = multi-draw indirect (feature);
     // full = no culling, static all-meshlets vertex-pull draw. Every model's
     // buffers follow the path (drawLayout.ts) before anything is encoded.
@@ -3270,36 +3286,11 @@ export class Renderer {
     // "Sorted blend pass"); the no-cull fallback keeps the vertex-shader
     // routing over its static full list
     const sortActive = opt.transparencyBlend && opt.hasTransparency && cullMode !== 'full';
-    // blend-pass slot: bit1 blend pass, bit2 Background mode, bit3 sorted list
-    fu[FRAME_SLOT.flags + 2] |= (opt.transparencyBackdrop ? 6 : 2) | (sortActive ? 8 : 0);
-    dev.queue.writeBuffer(this.frameBuf, 256, frameData);
-    this.lastFrameData = frameData;
+    const frameData = this.writeFrameUniforms(opt, cam, sortActive);
+    this.pointsLayer.prepare(origin, canvas.width, canvas.height, this.camera.lastP11, this.dpr * this.captureScale);
     const cullActive = cullMode !== 'full' && this.models.length > 0 && !opt.freezeCull && !hold;
-
     if (cullActive) {
-      // (cull params below are only consumed by the cull dispatches)
-      const params = new ArrayBuffer(PARAMS_SIZE);
-      const pf = new Float32Array(params);
-      pf.set(this.frustumPlanes(vp), 0); // 0..24
-      pf.set(this.camera.lastView, 24); // 24..40
-      pf.set([...eye, 1], 40); // 40..44
-      pf[44] = this.camera.lastP00;
-      pf[45] = this.camera.lastP11;
-      pf[46] = this.camera.near;
-      pf[47] = this.hzbMipCount;
-      pf[48] = this.hzbMipSizes[0]?.[0] ?? 1;
-      pf[49] = this.hzbMipSizes[0]?.[1] ?? 1;
-      pf[50] = pxCut;
-      pf[51] = opt.protectDist;
-      pf[52] = canvas.height;
-      new Uint32Array(params)[53] = opt.orthographic ? 1 : 0;
-      pf[54] = this.camera.orthoNear;
-      pf[55] = this.camera.orthoFar;
-      new Uint32Array(params)[56] = sortActive ? 1 : 0;
-      pf[57] = this.sortFar(eye);
-      new Uint32Array(params)[58] = Math.max(0, Math.floor(opt.newMeshletCap));
-      new Uint32Array(params)[59] = opt.cullMoved ? 1 : 0;
-      dev.queue.writeBuffer(this.paramsBuf, 0, params);
+      this.writeCullParams(opt, cam, pxCut, sortActive);
     }
 
     // AO runs in Motion mode every frame, in Static mode only while the camera
@@ -3313,73 +3304,292 @@ export class Renderer {
     this.aoRanLastFrame = aoActive;
 
     if (usePost) {
-      const pp = new ArrayBuffer(80);
-      const pu = new Uint32Array(pp);
-      const pf = new Float32Array(pp);
-      pu[0] = this.accumIdx;
-      pu[1] = this.accumIdx + 1;
-      // the raw-edge debug view needs both edge signals computed
-      const dbgEdges = opt.debugBuf === 4;
-      pu[2] =
-        (opt.geoEdges || dbgEdges || opt.sketch ? 1 : 0) |
-        (opt.itemEdges || dbgEdges || opt.sketch ? 2 : 0) |
-        (opt.fastAA ? 4 : 0) |
-        (opt.whiteOnDark ? 8 : 0) |
-        ((opt.debugBuf & 7) << 4) |
-        (aoActive || opt.debugBuf === 5 ? 256 : 0) |
-        (opt.orthographic ? 512 : 0) |
-        (hold && opt.fastAA ? 1024 : 0) | // re-present the sum, don't accumulate
-        (opt.sketch ? 2048 : 0) | // white paper, black edge lines
-        (opt.smoothMeshEdges ? 0 : 4096) | // smooth-mesh edge lines OFF
-        (opt.flatMeshEdges ? 0 : 8192) | // flat-mesh edge lines OFF
-        (opt.sketchRespectsEdgesOff ? 16384 : 0) |
-        (opt.sketch && opt.sketchColorMode === 'fill' ? 32768 : 0) |
-        (opt.sketch && opt.sketchColorMode === 'edges' ? 65536 : 0);
-      pf[3] = this.camera.near;
-      pf.set([...opt.edgeColor, 1], 4);
-      pf[8] = opt.depthThr;
-      pf[9] = opt.normalThr;
-      pf[10] = opt.fadeExp;
-      pf[11] = opt.darkThr;
-      pf[12] = opt.debugBuf === 5 ? 0 : opt.aoStrength; // debug view shows raw buffer
-      pf[13] = this.camera.orthoNear;
-      pf[14] = this.camera.orthoFar;
-      pf[15] = this.camera.focusDist;
-      // smooth-mesh (authored normals) edge tuning
-      pf[16] = opt.smoothDepthThr;
-      pf[17] = opt.smoothNormalThr;
-      pf[18] = opt.smoothFadeExp;
-      pf[19] = opt.sketchFillStrength;
-      dev.queue.writeBuffer(this.postParamsBuf, 0, pp);
+      this.writePostParams(opt, cam, hold, aoActive);
     }
-
     if (aoActive || opt.debugBuf === 5) {
-      const ap = new ArrayBuffer(64);
-      const af = new Float32Array(ap);
-      const au = new Uint32Array(ap);
-      af[0] = 1 / canvas.width;
-      af[1] = 1 / canvas.height;
-      af[2] = opt.aoRadius;
-      af[3] = 0.1; // ao_bias: min elevation above tangent plane
-      au[4] = this.aoAccum; // seed: fixed while moving -> stable noise pattern
-      au[5] = Math.max(1, opt.aoSlices);
-      au[6] = Math.max(1, Math.min(12, opt.aoSamples));
-      af[7] = 1 / (this.aoAccum + 1); // blend: running average like native
-      af[8] = this.camera.near;
-      af[9] = 0.5; // thickness_m: occluder slab depth
-      af[10] = this.camera.lastP00;
-      af[11] = this.camera.lastP11;
-      au[12] = opt.orthographic ? 1 : 0;
-      af[13] = this.camera.orthoHalfH;
-      af[14] = this.camera.orthoNear;
-      af[15] = this.camera.orthoFar;
-      dev.queue.writeBuffer(this.aoParamsBuf, 0, ap);
+      this.writeAoParams(opt, cam);
     }
 
     const enc = dev.createCommandEncoder();
     const swapTex = this.context.getCurrentTexture();
     const swapView = swapTex.createView();
-    const sceneView = usePost ? this.sceneColor!.createView() : swapView;
+    this.encodeScene(enc, opt, cam, { hold, cullActive, cullMode, sortActive, aoActive, usePost }, swapView, null);
+
+    // laser-scan panorama after post (outside the TAA history), under the
+    // outline and view cube; redrawn on hold frames like them
+    if (this.pano.active) {
+      this.pano.draw(
+        enc,
+        swapView,
+        this.depth!,
+        this.targetsMsaa,
+        this.camera,
+        canvas.width / canvas.height,
+        this.timings,
+      );
+    }
+
+    // outline overlay AFTER post (never enters the TAA history — the same
+    // reason the native renderer composites its hover outline inside TAA).
+    // It runs its OWN running average on the jittered edge signal, keyed to
+    // accumIdx, so it converges with the scene instead of hopping with the
+    // jitter; a hold frame only re-composites it.
+    this.drawnHoverId = effHover;
+    if (outlineOn) {
+      this.outline.encode(
+        enc,
+        dev,
+        canvas,
+        opt,
+        cullMode,
+        frameData,
+        this.frameBuf,
+        this.countsBuf,
+        this.models,
+        this.depth!,
+        swapView,
+        effHover,
+        this.accumIdx,
+        hold,
+        outlineHidden,
+        this.timings,
+      );
+    } else {
+      this.outline.dropHistory();
+    }
+
+    // view cube on top of the finished frame (after post so TAA never smears it)
+    if (!this.hideViewCube) {
+      this.viewCube.draw(
+        enc,
+        swapView,
+        canvas,
+        this.format,
+        this.dpr * this.captureScale,
+        !!(this.options.msaa4x || this.options.fastAA),
+        this.timings,
+      );
+    }
+
+    const pickJob = this.encodeDepthPick(enc, dev);
+
+    // the first still frame after any scene change reads counts too, so a
+    // residency commit's effect is known before the next decision
+    let statsBytes = 0;
+    const countsDue = t0 - this.lastCountRead > 500 || (this.accumIdx === 0 && !moving);
+    if (cullActive && !this.statsInFlight && countsDue) {
+      this.statsInFlight = true;
+      this.lastCountRead = t0;
+      statsBytes = this.models.length * COUNT_SLOT * COUNT_SLOTS;
+      enc.copyBufferToBuffer(this.countsBuf, 0, this.statsBuf, 0, statsBytes);
+    }
+    // the budget readback is NOT throttled like the stats: it decides both
+    // whether meshlets are still owed and whether the scene has converged at
+    // all, so it runs every culled frame — with the cap off as well, where
+    // only the convergence half is in play. Four bytes.
+    let capRead = false;
+    if (cullActive && !this.capReadInFlight) {
+      this.capReadInFlight = true;
+      this.capReadFrame = this.frameCounter;
+      capRead = true;
+      enc.copyBufferToBuffer(this.newBudgetBuf, 0, this.newBudgetReadBuf, 0, 4);
+    }
+
+    const itemPickJob = this.itemPick.encode(
+      enc,
+      dev,
+      canvas,
+      opt,
+      cullMode,
+      frameData,
+      this.frameBuf,
+      this.countsBuf,
+      this.models,
+      this.pickPipeline,
+      this.pickVpPipeline,
+      this.timings,
+      this.pickGbuffer(),
+    );
+
+    // snapshots copy the presented swapchain (post output + view cube), and
+    // only once accumulation has converged — before that the pending snap
+    // just keeps the renderer out of idle so it converges. A frame still at
+    // a stale size (live resize settling) is never captured, draft or not.
+    const snapJob = sizeCurrent ? this.encodeSnapshot(enc, dev, canvas, snapReady, swapTex) : null;
+    const tsJob = this.timings.resolve(enc);
+
+    dev.queue.submit([enc.finish()]);
+    this.awaitGpu(dev);
+    pickJob?.();
+    snapJob?.();
+    itemPickJob?.();
+    tsJob?.();
+    if (capRead) {
+      this.resolveCapBudget().catch(() => (this.capReadInFlight = false));
+    } else if (!cullActive) {
+      // held or unculled frames encode no cull, so the counter says nothing
+      this.capBacklog = false;
+      this.newVisibleWanted = 0;
+    }
+    if (statsBytes > 0) {
+      // vp mode: the counter is instanceCount, word 1 of the args block
+      this.resolveStats(statsBytes, cullMode === 'vp' ? 1 : 0).catch(() => (this.statsInFlight = false));
+    }
+
+    this.cpuMs = this.cpuMs * 0.9 + (performance.now() - t0) * 0.1;
+    this.frames++;
+    const now = performance.now();
+    if (now - this.lastStat > 500) {
+      this.fps = (this.frames * 1000) / (now - this.lastStat);
+      this.frames = 0;
+      this.lastStat = now;
+    }
+  }
+
+  /** The Frame uniform for one view: slot 0 feeds the opaque passes, slot 256
+   *  the blend pass (the same data plus its routing bits). Returns the blend
+   *  copy, which the outline and pick passes patch for their own slots. */
+  private writeFrameUniforms(opt: RenderOptions, cam: ViewCamera, sortActive: boolean): ArrayBuffer {
+    const { origin, eye, forward: fwd } = cam;
+    const frameData = new ArrayBuffer(FRAME_SIZE);
+    const ff = new Float32Array(frameData);
+    ff.set(cam.viewProjRel, FRAME_SLOT.viewProj);
+    ff.set([...origin, 0], FRAME_SLOT.origin);
+    ff[FRAME_SLOT.darkFloor] = opt.darkFloor;
+    ff.set([eye[0] - origin[0], eye[1] - origin[1], eye[2] - origin[2], 1], FRAME_SLOT.eye);
+    const fu = new Uint32Array(frameData);
+    fu[FRAME_SLOT.flags] = opt.meshletVis ? 1 : 0;
+    fu[FRAME_SLOT.flags + 1] = opt.suppressTintOnOverride ? 1 : 0;
+    fu[FRAME_SLOT.flags + 2] = opt.transparencyBlend ? 1 : 0; // bit1 (blend pass) set in slot 2
+    fu[FRAME_SLOT.flags + 3] = this.accumIdx; // alpha-hash seed
+    // ortho: directional headlight along the view axis (surface -> light = -fwd)
+    ff.set([-fwd[0], -fwd[1], -fwd[2], cam.ortho ? 1 : 0], FRAME_SLOT.light);
+    ff.set([...opt.ambientColor, opt.ambientIntensity], FRAME_SLOT.ambient);
+    ff.set([...opt.headlightColor, opt.headlightIntensity], FRAME_SLOT.headlight);
+    // selection REPLACES the color (a = blend); outline-only style zeroes the
+    // blend so selected items keep their true color (outline shows instead)
+    ff.set([...opt.selectionColor, opt.selectionTint ? 1.0 : 0.0], FRAME_SLOT.selColor);
+    ff.set([...opt.bgColor, opt.backdropFade], FRAME_SLOT.backdrop);
+    this.device.queue.writeBuffer(this.frameBuf, 0, frameData);
+    // blend-pass slot: bit1 blend pass, bit2 Background mode, bit3 sorted list
+    fu[FRAME_SLOT.flags + 2] |= (opt.transparencyBackdrop ? 6 : 2) | (sortActive ? 8 : 0);
+    this.device.queue.writeBuffer(this.frameBuf, 256, frameData);
+    this.lastFrameData = frameData;
+
+    return frameData;
+  }
+
+  /** The cull dispatches' parameters for one view (CullParams in shaders/cull.ts). */
+  private writeCullParams(opt: RenderOptions, cam: ViewCamera, pxCut: number, sortActive: boolean) {
+    const params = new ArrayBuffer(PARAMS_SIZE);
+    const pf = new Float32Array(params);
+    const pu = new Uint32Array(params);
+    pf.set(this.frustumPlanes(cam.viewProj), 0); // 0..24
+    pf.set(cam.view, 24); // 24..40
+    pf.set([...cam.eye, 1], 40); // 40..44
+    pf[44] = cam.p00;
+    pf[45] = cam.p11;
+    pf[46] = cam.near;
+    pf[47] = this.hzbMipCount;
+    pf[48] = this.hzbMipSizes[0]?.[0] ?? 1;
+    pf[49] = this.hzbMipSizes[0]?.[1] ?? 1;
+    pf[50] = pxCut;
+    pf[51] = opt.protectDist;
+    pf[52] = cam.height;
+    pu[53] = cam.ortho ? 1 : 0;
+    pf[54] = cam.orthoNear;
+    pf[55] = cam.orthoFar;
+    pu[56] = sortActive ? 1 : 0;
+    pf[57] = this.sortFar(cam.eye);
+    pu[58] = Math.max(0, Math.floor(opt.newMeshletCap));
+    pu[59] = opt.cullMoved ? 1 : 0;
+    this.device.queue.writeBuffer(this.paramsBuf, 0, params);
+  }
+
+  /** The post pass's parameters (PostParams in shaders/post.ts). */
+  private writePostParams(opt: RenderOptions, cam: ViewCamera, hold: boolean, aoActive: boolean) {
+    const pp = new ArrayBuffer(80);
+    const pu = new Uint32Array(pp);
+    const pf = new Float32Array(pp);
+    pu[0] = this.accumIdx;
+    pu[1] = this.accumIdx + 1;
+    // the raw-edge debug view needs both edge signals computed
+    const dbgEdges = opt.debugBuf === 4;
+    pu[2] =
+      (opt.geoEdges || dbgEdges || opt.sketch ? 1 : 0) |
+      (opt.itemEdges || dbgEdges || opt.sketch ? 2 : 0) |
+      (opt.fastAA ? 4 : 0) |
+      (opt.whiteOnDark ? 8 : 0) |
+      ((opt.debugBuf & 7) << 4) |
+      (aoActive || opt.debugBuf === 5 ? 256 : 0) |
+      (cam.ortho ? 512 : 0) |
+      (hold && opt.fastAA ? 1024 : 0) | // re-present the sum, don't accumulate
+      (opt.sketch ? 2048 : 0) | // white paper, black edge lines
+      (opt.smoothMeshEdges ? 0 : 4096) | // smooth-mesh edge lines OFF
+      (opt.flatMeshEdges ? 0 : 8192) | // flat-mesh edge lines OFF
+      (opt.sketchRespectsEdgesOff ? 16384 : 0) |
+      (opt.sketch && opt.sketchColorMode === 'fill' ? 32768 : 0) |
+      (opt.sketch && opt.sketchColorMode === 'edges' ? 65536 : 0);
+    pf[3] = cam.near;
+    pf.set([...opt.edgeColor, 1], 4);
+    pf[8] = opt.depthThr;
+    pf[9] = opt.normalThr;
+    pf[10] = opt.fadeExp;
+    pf[11] = opt.darkThr;
+    pf[12] = opt.debugBuf === 5 ? 0 : opt.aoStrength; // debug view shows raw buffer
+    pf[13] = cam.orthoNear;
+    pf[14] = cam.orthoFar;
+    pf[15] = cam.focusDist;
+    // smooth-mesh (authored normals) edge tuning
+    pf[16] = opt.smoothDepthThr;
+    pf[17] = opt.smoothNormalThr;
+    pf[18] = opt.smoothFadeExp;
+    pf[19] = opt.sketchFillStrength;
+    this.device.queue.writeBuffer(this.postParamsBuf, 0, pp);
+  }
+
+  /** VBAO's parameters (AoParams in shaders/post.ts). */
+  private writeAoParams(opt: RenderOptions, cam: ViewCamera) {
+    const ap = new ArrayBuffer(64);
+    const af = new Float32Array(ap);
+    const au = new Uint32Array(ap);
+    af[0] = 1 / cam.width;
+    af[1] = 1 / cam.height;
+    af[2] = opt.aoRadius;
+    af[3] = 0.1; // ao_bias: min elevation above tangent plane
+    au[4] = this.aoAccum; // seed: fixed while moving -> stable noise pattern
+    au[5] = Math.max(1, opt.aoSlices);
+    au[6] = Math.max(1, Math.min(12, opt.aoSamples));
+    af[7] = 1 / (this.aoAccum + 1); // blend: running average like native
+    af[8] = cam.near;
+    af[9] = 0.5; // thickness_m: occluder slab depth
+    af[10] = cam.p00;
+    af[11] = cam.p11;
+    au[12] = cam.ortho ? 1 : 0;
+    af[13] = cam.orthoHalfH;
+    af[14] = cam.orthoNear;
+    af[15] = cam.orthoFar;
+    this.device.queue.writeBuffer(this.aoParamsBuf, 0, ap);
+  }
+
+  /**
+   * One view's scene passes into `display`: cull pass 1 → render pass 1 →
+   * HZB → cull pass 2 (+ the transparent sort) → render pass 2 → blend pass
+   * → VBAO → post. The uniforms (writeFrameUniforms / writeCullParams /
+   * writePostParams / writeAoParams) must already be queued for this view.
+   * The desktop frame calls it once into the swapchain; a headset frame once
+   * per eye into its layer slice, with `viewport` placing the post output.
+   */
+  private encodeScene(
+    enc: GPUCommandEncoder,
+    opt: RenderOptions,
+    cam: ViewCamera,
+    flags: SceneFlags,
+    display: GPUTextureView,
+    viewport: DisplayViewport | null,
+  ) {
+    const { hold, cullActive, cullMode, sortActive, aoActive, usePost } = flags;
+    const sceneView = usePost ? this.sceneColor!.createView() : display;
     const clearColor = { r: opt.bgColor[0], g: opt.bgColor[1], b: opt.bgColor[2], a: 1 };
     const renderPipeline = opt.msaa4x ? this.renderPipeline4x : this.renderPipeline1x;
 
@@ -3472,7 +3682,7 @@ export class Renderer {
         // `greater` test hides them wherever something opaque was drawn while
         // they still occlude each other. The items render solid: a backdrop
         // layer behind everything opaque, the transparency itself gone.
-        pass.setViewport(0, 0, canvas.width, canvas.height, 0, BACKDROP_DEPTH_MAX);
+        pass.setViewport(0, 0, cam.width, cam.height, 0, BACKDROP_DEPTH_MAX);
       }
       drawScene(pass, cullMode === 'full' ? 1 : TRANSPARENT_LIST, true);
       pass.end();
@@ -3610,7 +3820,7 @@ export class Renderer {
       const aoPass = enc.beginComputePass({ timestampWrites: this.timings.writes(7) });
       aoPass.setPipeline(opt.msaa4x ? this.vbaoMsPipeline : this.vbaoPipeline);
       aoPass.setBindGroup(0, this.aoBind!);
-      aoPass.dispatchWorkgroups(Math.ceil(canvas.width / 8), Math.ceil(canvas.height / 8));
+      aoPass.dispatchWorkgroups(Math.ceil(cam.width / 8), Math.ceil(cam.height / 8));
       aoPass.end();
     }
 
@@ -3623,7 +3833,7 @@ export class Renderer {
       const post = enc.beginRenderPass({
         timestampWrites: this.timings.writes(8),
         colorAttachments: [
-          { view: swapView, loadOp: 'clear', storeOp: 'store' },
+          { view: display, loadOp: 'clear', storeOp: 'store' },
           {
             view: (even ? this.histB! : this.histA!).createView(),
             loadOp: 'clear',
@@ -3631,140 +3841,13 @@ export class Renderer {
           },
         ],
       });
+      if (viewport) {
+        post.setViewport(viewport.x, viewport.y, viewport.width, viewport.height, 0, 1);
+      }
       post.setPipeline(opt.msaa4x ? this.postMsPipeline : this.postPipeline);
       post.setBindGroup(0, even ? this.postBindEven! : this.postBindOdd!);
       post.draw(3);
       post.end();
-    }
-
-    // laser-scan panorama after post (outside the TAA history), under the
-    // outline and view cube; redrawn on hold frames like them
-    if (this.pano.active) {
-      this.pano.draw(
-        enc,
-        swapView,
-        this.depth!,
-        this.targetsMsaa,
-        this.camera,
-        canvas.width / canvas.height,
-        this.timings,
-      );
-    }
-
-    // outline overlay AFTER post (never enters the TAA history — the same
-    // reason the native renderer composites its hover outline inside TAA).
-    // It runs its OWN running average on the jittered edge signal, keyed to
-    // accumIdx, so it converges with the scene instead of hopping with the
-    // jitter; a hold frame only re-composites it.
-    this.drawnHoverId = effHover;
-    if (outlineOn) {
-      this.outline.encode(
-        enc,
-        dev,
-        canvas,
-        opt,
-        cullMode,
-        frameData,
-        this.frameBuf,
-        this.countsBuf,
-        this.models,
-        this.depth!,
-        swapView,
-        effHover,
-        this.accumIdx,
-        hold,
-        outlineHidden,
-        this.timings,
-      );
-    } else {
-      this.outline.dropHistory();
-    }
-
-    // view cube on top of the finished frame (after post so TAA never smears it)
-    if (!this.hideViewCube) {
-      this.viewCube.draw(
-        enc,
-        swapView,
-        canvas,
-        this.format,
-        this.dpr * this.captureScale,
-        !!(this.options.msaa4x || this.options.fastAA),
-        this.timings,
-      );
-    }
-
-    const pickJob = this.encodeDepthPick(enc, dev);
-
-    // the first still frame after any scene change reads counts too, so a
-    // residency commit's effect is known before the next decision
-    let statsBytes = 0;
-    const countsDue = t0 - this.lastCountRead > 500 || (this.accumIdx === 0 && !moving);
-    if (cullActive && !this.statsInFlight && countsDue) {
-      this.statsInFlight = true;
-      this.lastCountRead = t0;
-      statsBytes = this.models.length * COUNT_SLOT * COUNT_SLOTS;
-      enc.copyBufferToBuffer(this.countsBuf, 0, this.statsBuf, 0, statsBytes);
-    }
-    // the budget readback is NOT throttled like the stats: it decides both
-    // whether meshlets are still owed and whether the scene has converged at
-    // all, so it runs every culled frame — with the cap off as well, where
-    // only the convergence half is in play. Four bytes.
-    let capRead = false;
-    if (cullActive && !this.capReadInFlight) {
-      this.capReadInFlight = true;
-      this.capReadFrame = this.frameCounter;
-      capRead = true;
-      enc.copyBufferToBuffer(this.newBudgetBuf, 0, this.newBudgetReadBuf, 0, 4);
-    }
-
-    const itemPickJob = this.itemPick.encode(
-      enc,
-      dev,
-      canvas,
-      opt,
-      cullMode,
-      frameData,
-      this.frameBuf,
-      this.countsBuf,
-      this.models,
-      this.pickPipeline,
-      this.pickVpPipeline,
-      this.timings,
-      this.pickGbuffer(),
-    );
-
-    // snapshots copy the presented swapchain (post output + view cube), and
-    // only once accumulation has converged — before that the pending snap
-    // just keeps the renderer out of idle so it converges. A frame still at
-    // a stale size (live resize settling) is never captured, draft or not.
-    const snapJob = sizeCurrent ? this.encodeSnapshot(enc, dev, canvas, snapReady, swapTex) : null;
-    const tsJob = this.timings.resolve(enc);
-
-    dev.queue.submit([enc.finish()]);
-    this.awaitGpu(dev);
-    pickJob?.();
-    snapJob?.();
-    itemPickJob?.();
-    tsJob?.();
-    if (capRead) {
-      this.resolveCapBudget().catch(() => (this.capReadInFlight = false));
-    } else if (!cullActive) {
-      // held or unculled frames encode no cull, so the counter says nothing
-      this.capBacklog = false;
-      this.newVisibleWanted = 0;
-    }
-    if (statsBytes > 0) {
-      // vp mode: the counter is instanceCount, word 1 of the args block
-      this.resolveStats(statsBytes, cullMode === 'vp' ? 1 : 0).catch(() => (this.statsInFlight = false));
-    }
-
-    this.cpuMs = this.cpuMs * 0.9 + (performance.now() - t0) * 0.1;
-    this.frames++;
-    const now = performance.now();
-    if (now - this.lastStat > 500) {
-      this.fps = (this.frames * 1000) / (now - this.lastStat);
-      this.frames = 0;
-      this.lastStat = now;
     }
   }
 
