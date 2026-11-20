@@ -30,6 +30,8 @@ Entries from before the stable pilot (0.26.1) have been removed.
   headset connects or disconnects.
   Home ribbon: Persp. / Ortho moved out of Canvas into their own Camera
   section, with VR, AR and Forget alignments as small buttons beside them.
+  Assets: Model / Import / Export as small buttons (Export is new here), and
+  SQL with SQL Editor (new here) as medium buttons below each other.
 
   Renderer: the scene passes (cull → draw → HZB → cull → draw → blend → AO →
   post) moved out of `frame()` into `encodeScene()`, fed by a per-view camera

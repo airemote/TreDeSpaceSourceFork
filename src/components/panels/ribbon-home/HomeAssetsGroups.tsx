@@ -1,22 +1,27 @@
 import {
   IconCamera,
   IconDatabase,
+  IconFileExport,
   IconMoon,
   IconPackageImport,
+  IconSql,
   IconStack2,
   IconSun,
   IconTrash,
   IconTrashX,
 } from '@tabler/icons-react';
 import { RibbonButton, RibbonSection } from '@treDeSpaceUI/widgets';
+import { openExportPanel } from '../export/exportPanel';
 import { openImportManagerPanel } from '../import-manager/importManagerPanel';
 import { openModelAssetsPanel } from '../model-assets/modelAssetsPanel';
 import { settingsActions } from '../settings/settings.actions';
 import { settingsState } from '../settings/settings.state';
 import { openSqlAssetsPanel } from '../sql-assets/sqlAssetsPanel';
+import { openSqlEditorPanel } from '../sql-editor/sqlEditorPanel';
 import { ribbonHomeActions as act } from './ribbonHome.actions';
 
-/** Assets: the library/import panel openers plus the wipe-everything local
+/** Assets: the model panels (library / import / export) as small buttons, the
+ *  SQL panels (library / editor) as medium ones, and the wipe-everything local
  *  reset. Canvas: clear/screenshot and the light/dark theme toggle. */
 export function HomeAssetsGroups() {
   const dark = settingsState.use().theme === 'dark';
@@ -25,6 +30,7 @@ export function HomeAssetsGroups() {
     <>
       <RibbonSection title="Assets">
         <RibbonButton
+          size="mini"
           icon={<IconStack2 />}
           label="Model"
           tooltip="Open the Model Assets library (imported models in the browser)"
@@ -32,6 +38,7 @@ export function HomeAssetsGroups() {
           onClick={() => openModelAssetsPanel()}
         />
         <RibbonButton
+          size="mini"
           icon={<IconPackageImport />}
           label="Import"
           tooltip="Open the Import Manager (bring models into the library)"
@@ -39,11 +46,28 @@ export function HomeAssetsGroups() {
           onClick={() => openImportManagerPanel()}
         />
         <RibbonButton
+          size="mini"
+          icon={<IconFileExport />}
+          label="Export"
+          tooltip="Open the Export panel (GLB, IFC and .tdp export, scene snapshots)"
+          shortcut="export.open"
+          onClick={() => openExportPanel()}
+        />
+        <RibbonButton
+          size="medium"
           icon={<IconDatabase />}
           label="SQL"
           tooltip="Open the SQL Assets library (SQLite databases per store)"
           shortcut="sql.assets"
           onClick={() => openSqlAssetsPanel()}
+        />
+        <RibbonButton
+          size="medium"
+          icon={<IconSql />}
+          label="SQL Editor"
+          tooltip="Open the SQL Editor panel"
+          shortcut="sql.editor"
+          onClick={() => openSqlEditorPanel()}
         />
         <RibbonButton
           icon={<IconTrashX />}
