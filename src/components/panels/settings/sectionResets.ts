@@ -15,6 +15,8 @@ import { NAV_DEFAULTS, navActions, navState } from '../../../state/viewer/nav.st
 import { viewerActions } from '../../../state/viewer/viewer.actions';
 import { initialViewerState, type ViewerState, viewerState } from '../../../state/viewer/viewer.state';
 import { pickViewer, VIEWER_SECTION_KEYS } from '../../../state/viewer/viewerSettingsGroups';
+import { xrActions } from '../../../state/xr/xr.actions';
+import { XR_SETTINGS_DEFAULTS, xrSettingsState } from '../../../state/xr/xr.state';
 import { consoleActions } from '../console/console.actions';
 import { settingsActions } from './settings.actions';
 import { SETTINGS_DEFAULTS, settingsState } from './settings.state';
@@ -123,6 +125,12 @@ export const SETTINGS_SECTIONS = {
   // section inserted earlier would shift every later default key. Each late
   // section gets a fixed key in bindings.ts › LATE_SECTION_KEYS.
   navGizmo: viewerSection('Navigation gizmo', VIEWER_SECTION_KEYS.navGizmo),
+  xr: {
+    label: 'XR',
+    stores: [xrSettingsState],
+    isDirty: () => differs(xrSettingsState.get(), XR_SETTINGS_DEFAULTS),
+    reset: () => xrActions.resetSettings(),
+  },
 } satisfies Record<string, SectionDef>;
 
 export type SettingsSectionId = keyof typeof SETTINGS_SECTIONS;

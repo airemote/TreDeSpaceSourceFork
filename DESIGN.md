@@ -1928,7 +1928,9 @@ does not (verified by a full feature diff, 2026-07-18):
   the merged-model cook and the converters call the cooker with
   `compute_normals = false` (and it feeds edge quality, below).
 - **VR / OpenXR walkthrough.** Native has the `desk3d-xr` crate (per-eye
-  poses, controller locomotion). The web viewer has no WebXR path.
+  poses, controller locomotion). The web viewer now has its own WebXR path
+  (VR + passthrough AR over the WebXR/WebGPU binding, 2026-11-20 — see the
+  backlog entry and `plans/XR.md`), not a port of the native crate.
 
 ## Backlog in native too (not web-specific gaps)
 
@@ -2444,7 +2446,12 @@ guess, so one over-budget correction, bounded by dwell, is expected.
   lists structural prep edits (panel-registry extraction, local-manager
   discipline in SQL panels, unified blocking-UI store, SQL-worker
   lifecycle, messageApi forwarding seam) to land as normal refactors first.
-- **WebXR VR/AR — PLANNED, not scheduled** (`plans/XR.md`, design capture only).
+- **WebXR VR/AR — IMPLEMENTED 2026-11-20, not yet verified on a headset**
+  (`plans/XR.md` › Implementation). Home › XR starts VR or passthrough AR;
+  `Renderer.frameXr()` runs `encodeScene()` per eye into the projection
+  layer; `src/lib/xr/` holds the session, the pose math (the world→XR "rig")
+  and the controllers; Settings › XR the quality levers. The text below is the
+  design capture it was built from.
   VR model review first (Chrome on a Windows PC + a headset as display, wired
   or wireless, e.g. Quest 3 over Link/Virtual Desktop or a Steam Frame),
   on-site passthrough-AR alignment later. Unblocked by the WebXR/WebGPU

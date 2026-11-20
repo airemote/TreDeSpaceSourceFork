@@ -90,6 +90,7 @@ import { type ViewerState, viewerState } from '../state/viewer/viewer.state';
 import { viewpointsActions } from '../state/viewer/viewpoints.actions';
 import { viewpointsState } from '../state/viewer/viewpoints.state';
 import { viewpointViewerActions } from '../state/viewer/viewpointViewer.actions';
+import { xrActions } from '../state/xr/xr.actions';
 import { ANIMATION_AUTHOR_HOTKEYS, ANIMATION_PLAYER_HOTKEYS } from './animationBindings';
 import { ANIMATION_KEY_HOTKEYS } from './animationKeyBindings';
 import { ANIMATION_LOOK_HOTKEYS } from './animationLookBindings';
@@ -111,6 +112,7 @@ function bump(field: keyof ViewerState, delta: number, lo: number, hi: number) {
  *  filled up: each keeps a fixed key so no other section's default moves. */
 const LATE_SECTION_KEYS: Partial<Record<SettingsSectionId, string>> = {
   navGizmo: 'ALT 1265',
+  xr: 'ALT 1298',
 };
 
 // singleton number-input steppers (per-axis clipping + component-local opacity
@@ -2578,6 +2580,30 @@ export const HOTKEYS: HotkeyDef[] = [
     defaultKeys: 'ALT 1010',
     description: 'Download the current viewport as a PNG (includes the view cube)',
     run: () => void home.screenshot(),
+  },
+  {
+    id: 'home.xr.vr',
+    category: 'Home',
+    label: 'XR: enter / leave VR',
+    defaultKeys: 'ALT 1295',
+    description: 'Start a VR headset session from the current camera, or leave the running one',
+    run: () => void xrActions.toggle('vr'),
+  },
+  {
+    id: 'home.xr.ar',
+    category: 'Home',
+    label: 'XR: enter / leave AR',
+    defaultKeys: 'ALT 1296',
+    description: 'Start a passthrough AR headset session (model over the real world), or leave the running one',
+    run: () => void xrActions.toggle('ar'),
+  },
+  {
+    id: 'home.xr.forgetAlignments',
+    category: 'Home',
+    label: 'XR: forget AR alignments',
+    defaultKeys: 'ALT 1297',
+    description: 'Forget the AR alignments kept across sessions — the next AR session starts from the desktop view',
+    run: () => xrActions.forgetAlignments(),
   },
   {
     id: 'multiColor.open',

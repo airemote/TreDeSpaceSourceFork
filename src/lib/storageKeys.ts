@@ -31,6 +31,8 @@ export const VIEWER_STORAGE_NAMES = [
   'dialogIds',
   'scans',
   'viewpointViewer',
+  'xr',
+  'xrAlignments',
   // reset placeholders (globalReset.ts) with no store behind them yet
   'viewpoints',
   'labels',

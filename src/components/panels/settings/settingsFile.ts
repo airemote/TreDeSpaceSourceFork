@@ -1,5 +1,5 @@
 // Settings as one JSON file: the scope "Reset all settings" covers (rendering,
-// lighting, GPU, navigation, edges, AO, gizmo, stats, editor, theme) plus the
+// lighting, GPU, navigation, XR, edges, AO, gizmo, stats, editor, theme) plus the
 // colour-picker swatches and the custom keyboard shortcuts. Layout slots and
 // External apps are user content, not preferences — they stay out, exactly as
 // they do for Reset all.
@@ -9,6 +9,8 @@ import { DEFAULT_PICKER_SWATCHES, pickerSwatchesState } from '../../../state/pic
 import { gizmoLabelsActions, gizmoLabelsState, mergeGizmoLabels } from '../../../state/viewer/gizmoLabels.state';
 import { NAV_DEFAULTS, type NavState, navState } from '../../../state/viewer/nav.state';
 import { initialViewerState, type ViewerState, viewerState } from '../../../state/viewer/viewer.state';
+import { xrActions } from '../../../state/xr/xr.actions';
+import { xrSettingsState } from '../../../state/xr/xr.state';
 import { dialogs } from '../../dialogs/dialogs.actions';
 import { consoleActions } from '../console/console.actions';
 import { initTheme } from './settings.actions';
@@ -64,6 +66,7 @@ export function settingsToJson(): string {
       version: FILE_VERSION,
       viewer,
       nav: navState.get(),
+      xr: xrSettingsState.get(),
       gizmoLabels: gizmoLabelsState.get().labels,
       settings: settingsState.get(),
       pickerSwatches: pickerSwatchesState.get().colors,
@@ -107,6 +110,10 @@ export function applySettingsJson(text: string): Result<{ applied: string[] }> {
   if (isRecord(parsed.nav)) {
     navState.set({ ...NAV_DEFAULTS, ...(knownKeys(NAV_DEFAULTS, parsed.nav) as Partial<NavState>) });
     applied.push('navigation');
+  }
+  if (isRecord(parsed.xr)) {
+    xrActions.importSettings(parsed.xr);
+    applied.push('XR');
   }
   if (isRecord(parsed.gizmoLabels)) {
     gizmoLabelsActions.setAll(mergeGizmoLabels(parsed.gizmoLabels));

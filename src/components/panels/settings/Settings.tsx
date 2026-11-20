@@ -18,6 +18,7 @@ import { loadSettingsFile, saveSettingsFile } from './settingsFile';
 import { ShortcutsSettings } from './shortcuts/ShortcutsSettings';
 import { StatsTab } from './stats/StatsTab';
 import { StorageTab } from './storage/StorageTab';
+import { XrTab } from './xr/XrTab';
 
 /** Settings panel shell: the vertical tab strip + the global reset. Each tab's
  *  content lives in its own component and reads its stores directly. */
@@ -35,6 +36,7 @@ export function Settings() {
           { id: 'lighting', label: 'Lighting', content: <LightingTab /> },
           { id: 'gpu', label: 'GPU', content: <GpuTab /> },
           { id: 'navigation', label: 'Navigation', content: <NavigationTab /> },
+          { id: 'xr', label: 'XR', content: <XrTab /> },
           { id: 'edges', label: 'Edges', content: <EdgesTab /> },
           { id: 'ao', label: 'Ambient Occlusion', content: <AoTab /> },
           { id: 'gizmo', label: 'Gizmo', content: <GizmoTab /> },
@@ -64,13 +66,13 @@ export function Settings() {
         </Button>
         <Button
           tooltip={
-            'Reset Rendering, Lighting, GPU, Navigation, Edges, Ambient Occlusion, Gizmo, Stats, Editor, theme and custom Shortcuts to defaults.\n\nLayout slots and External apps are NOT touched — reset those from their own tabs.'
+            'Reset Rendering, Lighting, GPU, Navigation, XR, Edges, Ambient Occlusion, Gizmo, Stats, Editor, theme and custom Shortcuts to defaults.\n\nLayout slots and External apps are NOT touched — reset those from their own tabs.'
           }
           shortcut="settings.resetAll"
           onClick={() => {
             void dialogs
               .confirm(
-                'Reset all settings to defaults? This covers Rendering, Lighting, GPU, Navigation, Edges, Ambient Occlusion, Gizmo, Stats, Editor, theme and your custom keyboard Shortcuts.\n\nLayout slots and External apps are left as-is.',
+                'Reset all settings to defaults? This covers Rendering, Lighting, GPU, Navigation, XR, Edges, Ambient Occlusion, Gizmo, Stats, Editor, theme and your custom keyboard Shortcuts.\n\nLayout slots and External apps are left as-is.',
                 { okLabel: 'Reset all' },
               )
               .then((ok) => ok && settingsActions.resetAll());

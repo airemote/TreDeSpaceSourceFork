@@ -1,11 +1,89 @@
-# XR — WebXR VR/AR for the WebGPU viewer (PLANNED, not scheduled)
+# XR — WebXR VR/AR for the WebGPU viewer (IMPLEMENTED, not yet verified on a headset)
 
-> **Status: design capture, 2026-07-26; platform status re-checked
-> 2026-11-17** (from web sources, nothing tested by us). Direction agreed with
-> the director; no implementation started. Phase 1 (the spike) is deliberately
-> small and can be scheduled any time; phases 2-3 need a director-approved
-> plan first. File references were accurate when written — **re-verify at
-> implementation time**.
+> **Status: implemented 2026-11-20** — all three phases at once, on the
+> director's call: VR, passthrough AR, controllers, the align lock and AR
+> alignment persistence. Built and type-checked on Linux, where Chrome has no
+> WebXR, so **nothing has run in a headset yet** — the first Quest 3 session
+> is the verification; record findings in "Implementation › Verify on device".
+> The sections after "Implementation" are the design capture it was built
+> from (2026-07-26, platform status re-checked 2026-11-17).
+
+## Implementation (2026-11-20)
+
+**Where it lives**
+
+- `src/lib/render/renderer.ts` — `frame()`'s scene passes moved into
+  `encodeScene()` behind a per-view `ViewCamera` (`viewCamera.ts`).
+  `frameXr(views, options)` runs them once per eye into the projection-layer
+  slice, one submit per eye (the frame / cull / post uniforms are single
+  buffers; queue writes are ordered with submits). Off in a headset: TAA,
+  VBAO, the idle/hold path, outline, view cube, scan photo; the selection
+  always tints. Targets are sized to the eye; `frame()` rebuilds them when
+  the session ends (`targetW/H` vs the canvas).
+- `src/lib/render/xrPasses.ts` + `shaders/xr.ts` — the controller ray pick, the
+  depth hand-off, the desktop mirror.
+- `src/lib/xr/` — `webxr.ts` (the WebXR / binding / anchors type slice, no
+  types package), `xrMath.ts` (pose math, unit-tested), `xrControls.ts`
+  (xr-standard gamepad + locomotion, unit-tested), `xrSession.ts` (start-up,
+  the frame loop, input, anchors).
+- `src/state/xr/` — status, settings (persisted), saved alignments; Home ›
+  XR (`HomeXrGroup.tsx`), Settings › XR (`settings/xr/`), hotkeys
+  `home.xr.vr` / `home.xr.ar` / `home.xr.forgetAlignments`.
+
+**How it differs from the design below**
+
+- **One "rig" instead of an offset reference space.** The session uses
+  reference space `local` untouched; a single world→XR transform (heading +
+  translation, Z-up→Y-up) carries the start pose, locomotion, snap turn,
+  grab, the align lock and a restored anchor. `rigFromCamera` starts the
+  head on the desktop eye; on exit the desktop camera lands on the head.
+- **Projection.** The eye camera keeps the headset's x/y terms (p[0], p[5]
+  and the off-centre p[8], p[9]) and rebuilds depth in the renderer's own
+  reversed-Z infinite form, so the post / edge / snap depth math is unchanged.
+  The cull's sphere-box projection takes p[8]/p[9] (`CullParams.p20/p21`) —
+  without them the HZB test samples the wrong texels and drops visible
+  meshlets. VBAO still assumes a centred frustum, which is fine while it is
+  off in a headset.
+- **Culling per eye, shared history.** Both eyes use the same visibility bits
+  and HZB target in sequence: each eye's pass 1 starts from the other eye's
+  visible set (nearly identical views). The cut size is the always-on floor
+  (the head never stops, so the moving cut would hold the session low).
+- **Controller pick = screen-space ray march**, not the compute snap probe: the
+  ray (in the last eye's space) is marched against that eye's depth, then the
+  id G-buffer is read at the crossing (`xrRayPickWgsl`). One dispatch for both
+  hands, 16-byte readback, results a frame or two behind (fine for a reticle
+  and a trigger). A surface the eye cannot see is missed.
+- **AR passthrough** clears to black and the post pass writes alpha = the
+  share of MSAA samples holding geometry or a helper (the rays write no
+  depth, only the helper tag) — premultiplied by construction.
+- **Alignment persistence** uses the anchors module's persistent anchors
+  (`requestPersistentHandle` / `restorePersistentAnchor`): on releasing a grab
+  or the lock in AR an anchor is dropped at the hand / head (heading only) and
+  the world transform relative to it is stored per scene (loaded model names)
+  in `tds:xrAlignments`. A later AR session on that scene restores it once the
+  headset relocalises the anchor; grabbing again replaces it.
+- **Depth hand-off** is an option (Settings › XR, default off): our depth is
+  re-expressed in the headset projection's convention (`xrDepthWgsl`).
+- **Desktop mirror**: the post pass also writes the eye into the TAA history
+  texture (unused in a headset); the last eye is letterboxed onto the canvas.
+
+**Verify on device** (Quest 3 browser, flags on — Settings › XR lists them)
+
+1. Session starts; both eyes render; the scale is 1:1 and up is up.
+2. Frame rate on a small and on the dense model (Home › XR tooltip shows fps
+   while running) — the phase-3 question. Levers: render scale, foveation,
+   MSAA off, edges off.
+3. Occlusion: no geometry popping at the screen edges (the p20/p21 fix).
+4. AR: passthrough shows where there is no model; edges of the model are not
+   dark-fringed (if they are, the compositor wants straight alpha, not
+   premultiplied — change the post pass's AR branch).
+5. Colours match the desktop (layer format = the canvas format, 8-bit unorm;
+   if the headset treats it as linear, colours look washed out).
+6. Rays, reticles, trigger select, grip grab, A-lock, B reset, snap turn.
+7. AR alignment survives leaving and re-entering AR in the same place.
+8. Depth hand-off on: steadier reprojection, no swimming.
+9. `getViewSubImage` viewport: the code assumes it starts at (0, 0) and both
+   eyes are the same size (true for a texture-array projection layer).
 
 ## Goal / motivation
 

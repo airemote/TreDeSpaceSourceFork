@@ -72,6 +72,7 @@ import { collectStats, formatOverlay } from '../../../state/viewer/statsRows';
 import { gizmoCommitIntercepted, registerRenderer, viewerActions } from '../../../state/viewer/viewer.actions';
 import { viewerState } from '../../../state/viewer/viewer.state';
 import { vramBudgetMb } from '../../../state/viewer/vramBudget';
+import { xrActions } from '../../../state/xr/xr.actions';
 import { mountPlayBar } from '../animation-playbar/mountPlayBar';
 import { consoleActions } from '../console/console.actions';
 import { ribbonClippingBoxState } from '../ribbon-clipping-box/ribbonClippingBox.state';
@@ -623,6 +624,8 @@ export const viewport: PanelDefinition = {
       // SpaceMouse: re-open a device paired on an earlier visit (idempotent)
       spaceMouseActions.init();
       spaceCrosshair = attachSpaceCrosshair(host);
+      // headset (WebXR): find out whether VR / AR can start on this renderer
+      xrActions.init(renderer);
       // measure-probe trace (Settings → Stats → verbose trace → Console)
       const traceDeps = { host, canvas, renderer };
       renderer.onTrace = (line) => consoleActions.log('info', line);
@@ -950,6 +953,9 @@ export const viewport: PanelDefinition = {
           return; // gpuRecovery remounts the panel; nothing to draw meanwhile
         }
         frame = requestAnimationFrame(tick);
+        if (renderer.xrActive) {
+          return; // a headset session drives the frames (lib/xr/xrSession.ts)
+        }
         if (host.clientWidth === 0 || host.clientHeight === 0) {
           return; // hidden tab
         }
@@ -1058,6 +1064,7 @@ export const viewport: PanelDefinition = {
       residencyBoxes?.dispose();
       detachAnimation?.();
       spaceMouseActions.setCenterActions(null);
+      xrActions.end();
       spaceCrosshair?.dispose();
       unmountPlayBar?.();
       measureAim?.dispose();

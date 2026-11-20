@@ -5,6 +5,7 @@ import { emitApiEvent } from '../../../lib/messageApi/transport';
 import { gizmoLabelsActions } from '../../../state/viewer/gizmoLabels.state';
 import { navActions } from '../../../state/viewer/nav.state';
 import { initialViewerState, viewerState } from '../../../state/viewer/viewer.state';
+import { xrActions } from '../../../state/xr/xr.actions';
 import { consoleActions } from '../console/console.actions';
 import { SETTINGS_DEFAULTS, type SettingsState, settingsState } from './settings.state';
 
@@ -65,6 +66,7 @@ export const settingsActions = {
   resetAll() {
     viewerState.set(initialViewerState); // rendering/lighting/edges/AO/culling/picking/outline/debug/stats
     navActions.reset(); // navigation
+    xrActions.resetSettings(); // headset (XR)
     gizmoLabelsActions.reset(); // gizmo face labels
     hotkeysActions.resetAll(); // custom keyboard shortcuts
     settingsState.set({ ...SETTINGS_DEFAULTS }); // theme + GPU pref + editor (autosave/modules/snap)
