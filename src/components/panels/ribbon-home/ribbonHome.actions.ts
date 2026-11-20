@@ -23,6 +23,12 @@ export const ribbonHomeActions = {
     ribbonHomeState.set({ camera });
     viewerActions.setProjection(camera === 'ortho');
   },
+  /** Perspective ⇄ orthographic. Only the projection changes: the camera
+   *  keeps its position and target, and the ortho scale frames the target
+   *  plane exactly as the perspective view did. */
+  toggleCamera() {
+    ribbonHomeActions.setCamera(ribbonHomeState.get().camera === 'ortho' ? 'persp' : 'ortho');
+  },
   /** Grab the rendered frame (incl. the view cube overlay) and download a PNG.
    *  DOM/SVG overlays (measurements, clip gizmo) are rasterised on top —
    *  they live outside the GPU canvas. */

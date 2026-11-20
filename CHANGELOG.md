@@ -30,6 +30,9 @@ Entries from before the stable pilot (0.26.1) have been removed.
   headset connects or disconnects.
   Home ribbon: Persp. / Ortho moved out of Canvas into their own Camera
   section, with VR, AR and Forget alignments as small buttons beside them.
+  Persp. / Ortho are one toggle there now (it shows the current projection;
+  new hotkey `camera.projection.toggle`, the two direct ones stay). The
+  switch keeps the camera position and target, as before.
   Assets: Model / Import / Export as small buttons (Export is new here), and
   SQL with SQL Editor (new here) as medium buttons below each other.
 

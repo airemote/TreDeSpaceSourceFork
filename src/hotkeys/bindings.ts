@@ -2955,6 +2955,14 @@ export const HOTKEYS: HotkeyDef[] = [
     description: 'Switch to the orthographic camera',
     run: () => home.setCamera('ortho'),
   },
+  {
+    id: 'camera.projection.toggle',
+    category: 'Home',
+    label: 'Perspective ⇄ orthographic',
+    defaultKeys: 'ALT 1299',
+    description: 'Toggle the camera projection, keeping its position and target',
+    run: () => home.toggleCamera(),
+  },
   // — Clipping plane (3xx, per axis) —
   ...(['x', 'y', 'z'] as const).flatMap((axis, i) => [
     {
