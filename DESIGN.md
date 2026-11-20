@@ -2447,7 +2447,7 @@ guess, so one over-budget correction, bounded by dwell, is expected.
   discipline in SQL panels, unified blocking-UI store, SQL-worker
   lifecycle, messageApi forwarding seam) to land as normal refactors first.
 - **WebXR VR/AR — IMPLEMENTED 2026-11-20, not yet verified on a headset**
-  (`plans/XR.md` › Implementation). Home › XR starts VR or passthrough AR;
+  (`plans/XR.md` › Implementation). Home › Camera starts VR or passthrough AR;
   `Renderer.frameXr()` runs `encodeScene()` per eye into the projection
   layer; `src/lib/xr/` holds the session, the pose math (the world→XR "rig")
   and the controllers; Settings › XR the quality levers. The text below is the

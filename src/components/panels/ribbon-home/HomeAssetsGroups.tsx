@@ -1,10 +1,8 @@
 import {
   IconCamera,
-  IconCube,
   IconDatabase,
   IconMoon,
   IconPackageImport,
-  IconPerspective,
   IconStack2,
   IconSun,
   IconTrash,
@@ -17,13 +15,10 @@ import { settingsActions } from '../settings/settings.actions';
 import { settingsState } from '../settings/settings.state';
 import { openSqlAssetsPanel } from '../sql-assets/sqlAssetsPanel';
 import { ribbonHomeActions as act } from './ribbonHome.actions';
-import { ribbonHomeState } from './ribbonHome.state';
 
 /** Assets: the library/import panel openers plus the wipe-everything local
- *  reset. Canvas: clear/screenshot, the perspective/ortho camera switch and
- *  the light/dark theme toggle. */
+ *  reset. Canvas: clear/screenshot and the light/dark theme toggle. */
 export function HomeAssetsGroups() {
-  const { camera } = ribbonHomeState.use();
   const dark = settingsState.use().theme === 'dark';
 
   return (
@@ -73,20 +68,6 @@ export function HomeAssetsGroups() {
           tooltip="Download the current viewport as a PNG (includes the view cube)"
           shortcut="home.screenshot"
           onClick={() => void act.screenshot()}
-        />
-        <RibbonButton
-          icon={<IconPerspective />}
-          label="Persp."
-          selected={camera === 'persp'}
-          shortcut="camera.persp"
-          onClick={() => act.setCamera('persp')}
-        />
-        <RibbonButton
-          icon={<IconCube />}
-          label="Ortho"
-          selected={camera === 'ortho'}
-          shortcut="camera.ortho"
-          onClick={() => act.setCamera('ortho')}
         />
         <RibbonButton
           icon={dark ? <IconSun /> : <IconMoon />}

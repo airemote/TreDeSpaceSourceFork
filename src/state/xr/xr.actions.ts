@@ -198,7 +198,7 @@ async function refreshSupport(renderer: Renderer): Promise<void> {
 export function describeXrSupport(support: XrSupport): string {
   const modes = [support.vr ? 'VR' : '', support.ar ? 'AR (passthrough)' : ''].filter(Boolean);
   if (modes.length > 0) {
-    return `XR: ${modes.join(' and ')} available — start from Home › XR`;
+    return `XR: ${modes.join(' and ')} available — start from Home › Camera`;
   }
 
   return `XR: not available — ${support.reason ?? 'no headset session can start here'}`;

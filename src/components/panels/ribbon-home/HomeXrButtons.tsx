@@ -1,5 +1,5 @@
 import { IconAugmentedReality, IconCardboards, IconMapPinOff } from '@tabler/icons-react';
-import { RibbonButton, RibbonSection } from '@treDeSpaceUI/widgets';
+import { RibbonButton } from '@treDeSpaceUI/widgets';
 import type { ReactNode } from 'react';
 import { xrActions } from '../../../state/xr/xr.actions';
 import { type XrMode, type XrState, xrState } from '../../../state/xr/xr.state';
@@ -64,18 +64,20 @@ function describe(mode: XrMode, pitch: string, s: XrState): XrButtonView {
 // Render
 // -----------------------------------------------------------------------------
 
-/** Home › XR: enter / leave a headset session (VR, or passthrough AR), and
- *  forget the AR alignments kept across sessions. */
-export function HomeXrGroup() {
+/** Home › Camera › the headset buttons: enter / leave a session (VR, or
+ *  passthrough AR) and forget the AR alignments kept across sessions — one
+ *  column of small buttons. */
+export function HomeXrButtons() {
   const s = xrState.use();
 
   return (
-    <RibbonSection title="XR">
+    <>
       {MODES.map((m) => {
         const view = describe(m.mode, m.pitch, s);
         return (
           <RibbonButton
             key={m.mode}
+            size="mini"
             icon={m.icon}
             label={view.label}
             selected={view.isSelected}
@@ -95,6 +97,6 @@ export function HomeXrGroup() {
         shortcut="home.xr.forgetAlignments"
         onClick={xrActions.forgetAlignments}
       />
-    </RibbonSection>
+    </>
   );
 }

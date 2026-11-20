@@ -27,7 +27,7 @@
   (xr-standard gamepad + locomotion, unit-tested), `xrSession.ts` (start-up,
   the frame loop, input, anchors).
 - `src/state/xr/` — status, settings (persisted), saved alignments; Home ›
-  XR (`HomeXrGroup.tsx`), Settings › XR (`settings/xr/`), hotkeys
+  Camera (`HomeCameraGroup.tsx` + `HomeXrButtons.tsx`), Settings › XR (`settings/xr/`), hotkeys
   `home.xr.vr` / `home.xr.ar` / `home.xr.forgetAlignments`.
 
 **How it differs from the design below**
@@ -70,7 +70,7 @@
 **Verify on device** (Quest 3 browser, flags on — Settings › XR lists them)
 
 1. Session starts; both eyes render; the scale is 1:1 and up is up.
-2. Frame rate on a small and on the dense model (Home › XR tooltip shows fps
+2. Frame rate on a small and on the dense model (Home › Camera tooltip shows fps
    while running) — the phase-3 question. Levers: render scale, foveation,
    MSAA off, edges off.
 3. Occlusion: no geometry popping at the screen edges (the p20/p21 fix).

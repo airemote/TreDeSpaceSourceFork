@@ -8,14 +8,14 @@ Entries from before the stable pilot (0.26.1) have been removed.
 
 - **2026.11.20** (>0.26.7):
   XR headsets (VR and passthrough AR) over WebXR + WebGPU, aimed at the Quest 3
-  browser and at a PC with a headset as its display. Home › XR enters or
+  browser and at a PC with a headset as its display. Home › Camera enters or
   leaves a session from the current camera; on exit the desktop camera lands
   where you stood. Controllers: left stick moves (press = sprint), right stick
   snap-turns and rises/sinks, the trigger selects what the ray points at, the
   grip grabs the model (heading + position, never tilt), A held carries it
   with your head (the alignment "lock"), B returns to the start. In AR the
   background stays clear for the passthrough, and releasing a grab or the
-  lock keeps the alignment for that scene in a persistent anchor (Home › XR ›
+  lock keeps the alignment for that scene in a persistent anchor (Home › Camera ›
   Forget alignments drops them). Settings › XR: render scale, foveation, snap
   angle, MSAA, desktop mirror, depth hand-off to the headset. In a headset
   TAA, ambient occlusion, the outline and the view cube are off; a selection
@@ -28,6 +28,8 @@ Entries from before the stable pilot (0.26.1) have been removed.
   The console says once at boot whether VR / AR can start here, and why not
   (info, not a warning — no headset is the normal case); again only when a
   headset connects or disconnects.
+  Home ribbon: Persp. / Ortho moved out of Canvas into their own Camera
+  section, with VR, AR and Forget alignments as small buttons beside them.
 
   Renderer: the scene passes (cull → draw → HZB → cull → draw → blend → AO →
   post) moved out of `frame()` into `encodeScene()`, fed by a per-view camera
