@@ -324,17 +324,21 @@ fn frustum_cone_visible(m: MeshletCull, skip_cone: bool) -> bool {
 
 `;
 
-// MDI mode: append a full drawIndexedIndirect record, count in a plain atomic.
+// MDI mode: append a full drawIndexedIndirect record, count in counts[0].
 // VP (vertex-pull) mode: append just the meshlet index to a visible list; the
 // counter doubles as instanceCount inside a drawIndirect args block
-// [vertexCount, instanceCount, firstVertex, firstInstance] (372 = 124 tris x 3,
-// stamped by thread 0 each dispatch — the block is cleared every frame).
+// counts[0..3] = [vertexCount, instanceCount, firstVertex, firstInstance]
+// (372 = 124 tris x 3, stamped by thread 0 each dispatch — the block is
+// cleared every frame).
+// `counts` starts at the model's count slot in the shared counts buffer.
+// Pass 1 binds just the slot; pass 2 binds it through the end of the buffer,
+// whose last word is the frame's newly-visible budget (see emit_new).
 const CULL_EMIT_MDI = /* wgsl */ `
 @group(0) @binding(1) var<storage, read_write> records: array<u32>;
-@group(0) @binding(2) var<storage, read_write> draw_count: atomic<u32>;
+@group(0) @binding(2) var<storage, read_write> counts: array<atomic<u32>>;
 
 fn emit_opaque(m: MeshletCull, i: u32) {
-  let slot = atomicAdd(&draw_count, 1u) * 5u;
+  let slot = atomicAdd(&counts[0], 1u) * 5u;
   records[slot + 0u] = m.index_count;
   records[slot + 1u] = 1u;
   records[slot + 2u] = m.first_index;
@@ -347,21 +351,15 @@ fn emit_opaque(m: MeshletCull, i: u32) {
 `;
 
 const CULL_EMIT_VP = /* wgsl */ `
-struct DrawArgs {
-  vertex_count: u32,
-  instance_count: atomic<u32>,
-  first_vertex: u32,
-  first_instance: u32,
-};
 @group(0) @binding(1) var<storage, read_write> vis_list: array<u32>;
-@group(0) @binding(2) var<storage, read_write> args: DrawArgs;
+@group(0) @binding(2) var<storage, read_write> counts: array<atomic<u32>>;
 
 fn emit_opaque(m: MeshletCull, i: u32) {
-  vis_list[atomicAdd(&args.instance_count, 1u)] = i;
+  vis_list[atomicAdd(&counts[1], 1u)] = i;
 }
 
 fn stamp_args(gid: vec3u) {
-  if (gid.x == 0u) { args.vertex_count = 372u; }
+  if (gid.x == 0u) { atomicStore(&counts[0], 372u); }
 }
 `;
 
@@ -401,9 +399,14 @@ fn main(@builtin(global_invocation_id) gid: vec3u) {
 
 const CULL2_BODY = /* wgsl */ `
 @group(1) @binding(1) var hzb: texture_2d<f32>;
-// per-frame budget for NEWLY visible meshlets, shared by every model's pass-2
-// dispatch and cleared before the pass (see new_cap)
-@group(1) @binding(2) var<storage, read_write> new_budget: atomic<u32>;
+// Per-frame budget for NEWLY visible meshlets, shared by every model's pass-2
+// dispatch and cleared before the pass (see new_cap): the last word of the
+// counts buffer, which pass 2 binds through its end. Living there instead of
+// in a buffer of its own keeps the pass at 10 storage buffers — the limit
+// many mobile / standalone-headset GPUs offer.
+fn new_budget_word() -> u32 {
+  return arrayLength(&counts) - 1u;
+}
 
 // Conservative screen-space AABB of a view-space sphere (niagara's
 // projectSphere). c.z is positive distance in front of the camera.
@@ -438,7 +441,7 @@ fn project_sphere(c: vec3f, r: f32, aabb: ptr<function, vec4f>) -> bool {
  *  NOTHING new is the fixed point of the two-pass occlusion, and that — not a
  *  frame count — is what takes the renderer idle (renderer.ts settle window). */
 fn emit_new(m: MeshletCull, i: u32) -> bool {
-  let charged = atomicAdd(&new_budget, 1u);
+  let charged = atomicAdd(&counts[new_budget_word()], 1u);
   if (params.new_cap > 0u && charged >= params.new_cap) {
     return false;
   }

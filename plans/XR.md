@@ -93,8 +93,9 @@
 
 0. Before XR: the desktop view renders in the headset browser at all. In its
    console, `(await navigator.gpu.requestAdapter()).limits.maxStorageBuffersPerShaderStage`
-   must be ≥ 11 — the second cull pass binds 11 (8 shared, 2 draw-list,
-   1 budget) and Android adapters commonly offer 10. Note too whether
+   must be ≥ 10 — the cull passes bind 10 (the second one bound 11 until
+   2026-11-21, when its budget counter moved into the counts buffer;
+   Android adapters commonly offer 10). Note too whether
    `chromium-experimental-multi-draw-indirect` is in `adapter.features`
    (without it the vertex-pull path runs).
 1. Session starts; both eyes render; the scale is 1:1 and up is up.

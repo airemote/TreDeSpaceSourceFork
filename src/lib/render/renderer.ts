@@ -249,6 +249,13 @@ const COUNT_SLOT = 256; // storage-binding offset alignment
 /** Count slots per model: pass 1, pass 2, sorted transparent list, outline list. */
 const COUNT_SLOTS = 4;
 const MAX_MODELS = 4096;
+/** Every model's count slots. */
+const COUNT_SLOTS_BYTES = MAX_MODELS * COUNT_SLOT * COUNT_SLOTS;
+/** The frame's newly-visible budget (one u32 shared by every model's cull
+ *  pass 2): the counts buffer's last word, which pass 2 reaches by binding its
+ *  count slot through the end of the buffer — no buffer of its own, so the
+ *  pass stays within 10 storage buffers (shaders/cull.ts, new_budget_word). */
+const NEW_BUDGET_OFFSET = COUNT_SLOTS_BYTES;
 const PARAMS_SIZE = 256; // CullParams in shaders/cull.ts (62 words, rounded to 16 bytes)
 /** Perspective sort-key span above the near plane before any model has bounds. */
 const SORT_FAR_FALLBACK_OCTAVES = 20;
@@ -922,7 +929,6 @@ export class Renderer {
   // periodic draw-count readback for the HUD
   private statsBuf!: GPUBuffer;
   private statsInFlight = false;
-  private newBudgetBuf!: GPUBuffer;
   private newBudgetReadBuf!: GPUBuffer;
   private capReadInFlight = false;
   /** meshlets pass 2 wanted to draw last resolved frame (>= the cap means the
@@ -1197,8 +1203,10 @@ export class Renderer {
         maxBufferSize: Math.min(adapter.limits.maxBufferSize, 2147483648),
         maxStorageBufferBindingSize: Math.min(adapter.limits.maxStorageBufferBindingSize, 2147483648),
         // the vertex-pull path binds 9 vertex-stage storage buffers since the
-        // authored-normal stream landed (default limit is 8) — clamped to the
-        // adapter's own max so the request itself can never fail
+        // authored-normal stream landed (default limit is 8), the cull passes
+        // 10 compute-stage ones (NEW_BUDGET_OFFSET keeps pass 2 there — many
+        // mobile / standalone-headset adapters offer exactly 10) — clamped to
+        // the adapter's own max so the request itself can never fail
         maxStorageBuffersPerShaderStage: Math.min(adapter.limits.maxStorageBuffersPerShaderStage, 16),
       },
     });
@@ -1277,21 +1285,15 @@ export class Renderer {
     dev.queue.writeBuffer(this.transformsBuf, 0, new Float32Array([1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]));
     this.countsBuf = dev.createBuffer({
       label: 'countsBuf',
-      size: MAX_MODELS * COUNT_SLOT * COUNT_SLOTS,
+      size: COUNT_SLOTS_BYTES + 4,
       usage: GPUBufferUsage.STORAGE | GPUBufferUsage.INDIRECT | GPUBufferUsage.COPY_DST | GPUBufferUsage.COPY_SRC,
     });
     this.statsBuf = dev.createBuffer({
       label: 'statsBuf',
-      size: MAX_MODELS * COUNT_SLOT * COUNT_SLOTS,
+      size: COUNT_SLOTS_BYTES,
       usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ,
     });
-    // newly-visible budget: one counter for the whole frame (every model's
-    // pass-2 dispatch shares it), plus its readback staging buffer
-    this.newBudgetBuf = dev.createBuffer({
-      label: 'newBudgetBuf',
-      size: 4,
-      usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST | GPUBufferUsage.COPY_SRC,
-    });
+    // readback staging for the newly-visible budget (NEW_BUDGET_OFFSET)
     this.newBudgetReadBuf = dev.createBuffer({
       label: 'newBudgetReadBuf',
       size: 4,
@@ -1984,8 +1986,8 @@ export class Renderer {
           })
         : null;
     return {
-      cull1: this.cullBindOf(m, vp ? this.cullVp1Pipeline : this.cull1Pipeline, m.recordBuf1, m.countOffset1),
-      cull2: this.cullBindOf(m, vp ? this.cullVp2Pipeline : this.cull2Pipeline, m.recordBuf2, m.countOffset2),
+      cull1: this.cullBindOf(m, vp ? this.cullVp1Pipeline : this.cull1Pipeline, m.recordBuf1, m.countOffset1, false),
+      cull2: this.cullBindOf(m, vp ? this.cullVp2Pipeline : this.cull2Pipeline, m.recordBuf2, m.countOffset2, true),
       vp1: vpGeo(m.recordBuf1),
       vp2: vpGeo(m.recordBuf2),
       vpT: vpGeo(m.sort?.recordBufT),
@@ -2007,21 +2009,32 @@ export class Renderer {
 
   /** One cull pass's bind group. Args size differs: MDI binds a bare 4-byte
    *  atomic counter, the vertex-pull emit binds the full 16-byte drawIndirect
-   *  args block at the same offset. On the no-cull path (no sorted list) the
-   *  shared stand-ins fill the sort candidate and state bindings. */
+   *  args block at the same offset. Pass 2 (`reachesBudget`) binds from its
+   *  slot to the end of the counts buffer instead, so it reaches the shared
+   *  newly-visible budget in the last word. On the no-cull path (no sorted
+   *  list) the shared stand-ins fill the sort candidate and state bindings. */
   private cullBindOf(
     m: Omit<GpuModel, 'binds' | 'bytes'>,
     pipeline: GPUComputePipeline,
     recordBuf: GPUBuffer,
     countOffset: number,
+    reachesBudget: boolean,
   ): GPUBindGroup {
+    const slotBytes = m.path === 'mdi' ? 4 : 16;
     return this.device.createBindGroup({
       label: 'cullBind',
       layout: pipeline.getBindGroupLayout(0),
       entries: [
         { binding: 0, resource: { buffer: m.meshletCullBuf } },
         { binding: 1, resource: { buffer: recordBuf } },
-        { binding: 2, resource: { buffer: this.countsBuf, offset: countOffset, size: m.path === 'mdi' ? 4 : 16 } },
+        {
+          binding: 2,
+          resource: {
+            buffer: this.countsBuf,
+            offset: countOffset,
+            size: reachesBudget ? NEW_BUDGET_OFFSET + 4 - countOffset : slotBytes,
+          },
+        },
         { binding: 3, resource: { buffer: m.visBuf } },
         { binding: 4, resource: { buffer: m.meshletInfoBuf } },
         { binding: 5, resource: { buffer: m.itemStateBuf } },
@@ -2987,7 +3000,6 @@ export class Renderer {
       entries: [
         { binding: 0, resource: { buffer: this.paramsBuf } },
         { binding: 1, resource: this.hzb.createView() },
-        { binding: 2, resource: { buffer: this.newBudgetBuf } },
         { binding: 3, resource: { buffer: this.clipBuf } },
       ],
     });
@@ -2997,7 +3009,6 @@ export class Renderer {
       entries: [
         { binding: 0, resource: { buffer: this.paramsBuf } },
         { binding: 1, resource: this.hzb.createView() },
-        { binding: 2, resource: { buffer: this.newBudgetBuf } },
         { binding: 3, resource: { buffer: this.clipBuf } },
       ],
     });
@@ -3427,7 +3438,7 @@ export class Renderer {
       this.capReadInFlight = true;
       this.capReadFrame = this.frameCounter;
       capRead = true;
-      enc.copyBufferToBuffer(this.newBudgetBuf, 0, this.newBudgetReadBuf, 0, 4);
+      enc.copyBufferToBuffer(this.countsBuf, NEW_BUDGET_OFFSET, this.newBudgetReadBuf, 0, 4);
     }
 
     const itemPickJob = this.itemPick.encode(
@@ -3914,7 +3925,7 @@ export class Renderer {
       const vp = cullMode === 'vp';
       if (cullActive) {
         enc.clearBuffer(this.countsBuf, 0, this.models.length * COUNT_SLOT * COUNT_SLOTS);
-        enc.clearBuffer(this.newBudgetBuf);
+        enc.clearBuffer(this.countsBuf, NEW_BUDGET_OFFSET, 4);
         if (sortActive) {
           for (const m of this.models) {
             if (!m.dead && m.meshletCount > 0 && m.transparent && m.sort) {

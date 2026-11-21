@@ -6,6 +6,16 @@ version at release time. See CLAUDE.md for the rule.
 
 Entries from before the stable pilot (0.26.1) have been removed.
 
+- **2026.11.21** (>0.26.7):
+  The second cull pass binds 10 storage buffers instead of 11: its
+  newly-visible budget counter moved from a buffer of its own into the last
+  word of the shared draw-counts buffer, which pass 2 now binds from its slot
+  to the end. Many mobile and standalone-headset GPUs offer exactly 10, and
+  there the pass failed validation — on the vertex-pull path (the default
+  without multi-draw indirect) nothing was drawn. No change in what is
+  culled: the real cull shaders, before and after, give identical draw
+  counts, draw lists, visibility and budget on synthetic scenes (HZB empty /
+  half / full, budget cap on and off, both draw paths).
 - **2026.11.20** (>0.26.7):
   XR, checked against the current headset platform: a Quest keeps only 8
   persistent anchors per site, and Unpin used to forget alignments in the
